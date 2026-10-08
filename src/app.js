@@ -33,7 +33,7 @@ const WorkspaceStore = (() => {
   async function initialize(session) {
     const epoch = ++loadEpoch;
     const loadedUser = { id: session.user.id, name: session.user.email };
-    const [ws, ms, hs, ps] = await Promise.all([
+    const [ws, ms, hs, ps, profiles, ownProfile] = await Promise.all([
       db.from("workspaces").select("*"),
       db.from("workspace_members").select("*"),
       db.from("workspace_homes").select("*"),
@@ -42,9 +42,15 @@ const WorkspaceStore = (() => {
         .select("*")
         .eq("user_id", loadedUser.id)
         .maybeSingle(),
+      db.from("user_profiles").select("*"),
+      db.from("user_profiles").select("*").eq("user_id", loadedUser.id),
     ]);
     if (epoch !== loadEpoch) return;
-    user = loadedUser;
+    const profileRows = check(profiles);
+    user = {
+      ...loadedUser,
+      username: check(ownProfile)[0]?.username || "",
+    };
     state.workspaces = check(ws).map((w) => ({
       ...w,
       enabledApps: w.enabled_apps,
@@ -53,7 +59,9 @@ const WorkspaceStore = (() => {
       ...m,
       workspaceId: m.workspace_id,
       userId: m.user_id,
-      name: m.user_id === user.id ? user.name : m.user_id,
+      name:
+        profileRows.find((p) => p.user_id === m.user_id)?.username ||
+        (m.user_id === user.id ? user.name : m.user_id),
     }));
     state.homes = check(hs).map((h) => ({
       ...h,
@@ -197,6 +205,26 @@ const WorkspaceStore = (() => {
       setWriting(false);
     }
   }
+  async function setUsername(value) {
+    const username = value.trim().toLowerCase();
+    if (!/^[a-z][a-z0-9_]{2,29}$/.test(username))
+      throw Error(
+        "Use 3–30 characters: start with a letter, then letters, numbers, or underscores.",
+      );
+    setWriting(true);
+    try {
+      const q = user.username
+        ? db.from("user_profiles").update({ username }).eq("user_id", user.id)
+        : db.from("user_profiles").insert({ user_id: user.id, username });
+      const result = await q.select("*").single();
+      if (result.error?.code === "23505")
+        throw Error("That username is already taken.");
+      check(result);
+      await initialize({ user: { id: user.id, email: user.name } });
+    } finally {
+      setWriting(false);
+    }
+  }
   async function removeMember(id) {
     setWriting(true);
     try {
@@ -242,6 +270,7 @@ const WorkspaceStore = (() => {
     saveAppearance,
     flush,
     addMember,
+    setUsername,
     removeMember,
     members: () =>
       state.members.filter((m) => m.workspaceId === state.activeWorkspaceId),
@@ -329,10 +358,10 @@ const apps = [
   },
   {
     id: "tax-tracker",
-    name: "Tax tracker",
-    description: "Totals and tax records",
+    name: "Hotel Tax Calculator",
+    description: "Guest charges and hotel tax",
     icon: "receipt",
-    color: "#51a88e",
+    color: "var(--accent)",
   },
   {
     id: "documents",
@@ -416,22 +445,21 @@ const esc = (value) =>
   );
 const workspaceApps = () =>
   apps.filter((a) => WorkspaceStore.active().enabledApps.includes(a.id));
+let usernameMatch = null;
 let draft = null,
   route = "home";
 const main = document.querySelector("main"),
-  systemTheme = matchMedia("(prefers-color-scheme: dark)");
+  systemTheme = matchMedia("(prefers-color-scheme: dark)"),
+  forcedColors = matchMedia("(forced-colors: active)");
 function applyAppearance() {
-  document.body.dataset.dark = String(
-    prefs.theme === "dark" || (prefs.theme === "system" && systemTheme.matches),
-  );
+  const dark =
+    prefs.theme === "dark" || (prefs.theme === "system" && systemTheme.matches);
+  document.documentElement.dataset.dark = String(dark);
+  document.body.dataset.dark = String(dark);
   document.body.dataset.wallpaper = prefs.wallpaper;
   document.body.dataset.density = prefs.density;
   document.body.dataset.layout = prefs.layout;
   document.documentElement.style.setProperty("--accent", prefs.accent);
-  document.documentElement.style.setProperty(
-    "--accent-soft",
-    `color-mix(in srgb, ${prefs.accent} 12%, var(--surface))`,
-  );
   document.querySelector('meta[name="theme-color"]').content = prefs.accent;
 }
 function save() {
@@ -467,7 +495,7 @@ function home() {
       })
       .join(
         "",
-      )}<button class="tile add-tile" data-route="library"><span class="app-icon">${icon("plus")}</span><span class="tile-content"><strong>Add Mini Apps</strong>${prefs.density === "detailed" ? "<small>Browse available Mini Apps</small>" : ""}</span></button></div><div class="home-note">${icon("info")}<span>This is your foundation preview. Example shortcuts let you try the layout. <button data-route="library">Explore the app library</button></span></div>`
+      )}<button class="tile add-tile" data-route="library"><span class="app-icon">${icon("plus")}</span><span class="tile-content"><strong>Add Mini Apps</strong>${prefs.density === "detailed" ? "<small>Browse available Mini Apps</small>" : ""}</span></button></div><div class="home-note">${icon("info")}<span>Your workspace, your shortcuts. <button data-route="library">Explore the app library</button></span></div>`
   );
 }
 function library() {
@@ -478,10 +506,10 @@ function library() {
       "App library",
       "Choose which shortcuts appear on your home screen.",
     ) +
-    `<div class="notice">These are example shortcuts for testing the home screen. Mini Apps will be built and added here as you approve them.</div><div class="library-list">${workspaceApps()
+    `<div class="notice">Hotel Tax Calculator is ready to use. The other shortcuts are examples for future Mini Apps.</div><div class="library-list">${workspaceApps()
       .map(
         (a) =>
-          `<article class="library-card">${appIcon(a)}<div><h3>${a.name}</h3><p>${a.description}</p><small class="badge">Example</small></div><button class="btn ${list.includes(a.id) ? "" : "primary"}" data-toggle="${a.id}">${icon(list.includes(a.id) ? "check" : "plus")} ${list.includes(a.id) ? "On home" : "Add to home"}</button></article>`,
+          `<article class="library-card">${appIcon(a)}<div><h3>${a.name}</h3><p>${a.description}</p><small class="badge">${a.id === "tax-tracker" ? "Available" : "Example"}</small></div><button class="btn ${list.includes(a.id) ? "" : "primary"}" data-toggle="${a.id}">${icon(list.includes(a.id) ? "check" : "plus")} ${list.includes(a.id) ? "On home" : "Add to home"}</button></article>`,
       )
       .join(
         "",
@@ -504,15 +532,15 @@ function edit() {
               return `<div class="edit-row">${appIcon(a)}<strong>${a.name}</strong><div class="row-actions"><button class="icon-btn" data-move="${id}" data-dir="-1" ${i === 0 ? "disabled" : ""} aria-label="Move ${a.name} earlier">${icon("up")}</button><button class="icon-btn" data-move="${id}" data-dir="1" ${i === draft.length - 1 ? "disabled" : ""} aria-label="Move ${a.name} later">${icon("down")}</button><button class="icon-btn" data-remove="${id}" aria-label="Hide ${a.name}">${icon("minus")}</button></div></div>`;
             })
             .join("")
-        : `<div class="empty"><h2>A clean slate.</h2><p>Add example shortcuts below to try your layout.</p></div>`
+        : `<div class="empty"><h2>A clean slate.</h2><p>Add Mini Apps below to make this space yours.</p></div>`
     }</div><div class="section-head"><h2>Available shortcuts</h2><span>Hiding keeps app data</span></div><div class="library-list">${
       workspaceApps()
         .filter((a) => !draft.includes(a.id))
         .map(
           (a) =>
-            `<article class="library-card">${appIcon(a)}<div><h3>${a.name}</h3><p>Example shortcut</p></div><button class="btn" data-toggle="${a.id}">${icon("plus")} Add</button></article>`,
+            `<article class="library-card">${appIcon(a)}<div><h3>${a.name}</h3><p>${a.id === "tax-tracker" ? a.description : "Example shortcut"}</p></div><button class="btn" data-toggle="${a.id}">${icon("plus")} Add</button></article>`,
         )
-        .join("") || "<p>All example shortcuts are on your home screen.</p>"
+        .join("") || "<p>All enabled Mini Apps are on your home screen.</p>"
     }</div>`
   );
 }
@@ -526,7 +554,7 @@ function options(k, values) {
   return `<div class="segmented">${values.map(([value, label, ico]) => `<button data-pref="${k}" data-value="${value}" class="${prefs[k] === value ? "selected" : ""}" aria-pressed="${prefs[k] === value}">${ico ? icon(ico) : ""}${label}</button>`).join("")}</div>`;
 }
 function appearance() {
-  return `<section class="panel"><h2>Appearance</h2><p>A workspace that feels like yours.</p><div class="setting-row"><span class="setting-title">Theme</span>${options(
+  return `<section class="panel"><h2>Appearance</h2><p>A workspace that feels like yours.</p>${forcedColors.matches ? '<div class="notice" role="status">Your browser is enforcing a contrast palette, which overrides the selected accent and theme. To use the app’s colors, check Windows Settings → Accessibility → Contrast themes and select None. Your appearance choices are still saved.</div>' : ""}<div class="setting-row"><span class="setting-title">Theme</span>${options(
     "theme",
     [
       ["light", "Light", "sun"],
@@ -554,7 +582,7 @@ function appearance() {
   )}<p class="setting-help">Compact shows app names. Detailed adds a short description.</p></div></section><p style="margin-top:18px;font-size:14px">Your appearance is personal and stays consistent across workspaces. Preferences are saved privately to your account.</p>`;
 }
 function account() {
-  return `<section class="panel"><h2>BackendOS account</h2><div class="detail-row"><strong>Email</strong><span>${esc(WorkspaceStore.user.name)}</span></div><div class="detail-row"><strong>Your user ID</strong><span>${esc(WorkspaceStore.user.id)}</span></div><p>Share your user ID with a workspace owner to join their workspace.</p><button class="btn" id="sign-out">Sign out</button></section>`;
+  return `<section class="panel"><h2>BackendOS account</h2><div class="detail-row"><strong>Email</strong><span>${esc(WorkspaceStore.user.name)}</span></div><div class="detail-row"><strong>Your user ID</strong><span>${esc(WorkspaceStore.user.id)}</span></div><form id="username-form"><label class="form-label" for="account-username">Username</label><input id="account-username" name="username" value="${esc(WorkspaceStore.user.username)}" required minlength="3" maxlength="30" pattern="[A-Za-z][A-Za-z0-9_]{2,29}" autocomplete="username" placeholder="e.g. samhull"><p>3–30 letters, numbers, or underscores; start with a letter. Usernames are unique and ignore capitalization. Changing yours keeps your memberships.</p><p class="form-error" role="alert"></p><button class="btn primary" type="submit">Save username</button></form><p>Share your username (or user ID) with a workspace Owner to join their workspace.</p><button class="btn" id="sign-out">Sign out</button></section>`;
 }
 function connections() {
   return `<section class="panel"><h2>Connected accounts</h2><p>Manage the services used by your Mini Apps.</p>${[
@@ -580,6 +608,21 @@ function settings() {
     `<div class="settings-layout"><nav class="settings-nav" aria-label="Settings sections">${tabs.map(([id, ico, label]) => `<button data-route="${id}" class="${route === id ? "active" : ""}" ${route === id ? 'aria-current="page"' : ""}>${icon(ico)}${label}</button>`).join("")}</nav><div>${route === "workspace" ? workspaceSettings() : route === "appearance" ? appearance() : route === "account" ? account() : connections()}</div></div>`
   );
 }
+const hotelTax = window.HotelTax?.create({
+  db,
+  root: main,
+  toast,
+  setWriting,
+  context: () =>
+    cloudReady &&
+    route === "hotel-tax" &&
+    WorkspaceStore.active()?.enabledApps.includes("tax-tracker")
+      ? {
+          ...WorkspaceContext.current(),
+          workspaceName: WorkspaceStore.active().name,
+        }
+      : null,
+});
 function render() {
   if (!WorkspaceStore.active()) {
     emptyView();
@@ -593,6 +636,20 @@ function render() {
       "aria-label",
       `Switch workspace, active business: ${WorkspaceStore.active().name}`,
     );
+  document.querySelectorAll(".dock button").forEach((b) => {
+    const active =
+      b.dataset.route === route ||
+      (b.dataset.route === "appearance" && tabs.some((t) => t[0] === route)) ||
+      (b.dataset.route === "home" && ["edit", "hotel-tax"].includes(route));
+    b.classList.toggle("active", active);
+    if (active) b.setAttribute("aria-current", "page");
+    else b.removeAttribute("aria-current");
+  });
+  if (route === "hotel-tax") {
+    hotelTax.draw();
+    document.title = "BackendOS · Hotel Tax Calculator";
+    return;
+  }
   main.innerHTML =
     route === "home"
       ? home()
@@ -602,28 +659,35 @@ function render() {
           ? edit()
           : settings();
   document.title = `BackendOS · ${route === "home" ? "Home" : route === "library" ? "App library" : route === "edit" ? "Edit home" : "Settings"}`;
-  document.querySelectorAll(".dock button").forEach((b) => {
-    const active =
-      b.dataset.route === route ||
-      (b.dataset.route === "appearance" && tabs.some((t) => t[0] === route)) ||
-      (b.dataset.route === "home" && route === "edit");
-    b.classList.toggle("active", active);
-    if (active) b.setAttribute("aria-current", "page");
-    else b.removeAttribute("aria-current");
-  });
 }
 function navigate(next) {
   if (!WorkspaceStore.active()) {
     emptyView();
     return;
   }
-  if (!["home", "library", "edit", ...tabs.map((t) => t[0])].includes(next))
+  if (
+    ![
+      "home",
+      "library",
+      "edit",
+      "hotel-tax",
+      ...tabs.map((t) => t[0]),
+    ].includes(next)
+  )
     next = "home";
+  if (
+    next === "hotel-tax" &&
+    !WorkspaceStore.active().enabledApps.includes("tax-tracker")
+  )
+    next = "home";
+  const enterHotel = next === "hotel-tax" && route !== next;
+  if (next !== route) hotelTax?.cancel();
   if (route === "edit" && next !== "edit") draft = null;
   route = next;
   if (route === "edit" && !draft) draft = [...prefs.visible];
   if (location.hash !== `#${next}`) history.pushState(null, "", `#${next}`);
   render();
+  if (enterHotel) hotelTax?.load();
   window.scrollTo(0, 0);
   main.focus({ preventScroll: true });
 }
@@ -631,7 +695,7 @@ document.addEventListener("click", async (e) => {
   if (!cloudReady) return;
   try {
     const b = e.target.closest("button");
-    if (!b) return;
+    if (!b || b.hasAttribute("data-hotel")) return;
     if (b.hasAttribute("data-remove-member")) {
       await WorkspaceStore.removeMember(b.dataset.removeMember);
       render();
@@ -716,6 +780,11 @@ document.addEventListener("click", async (e) => {
         toast("This Mini App is not enabled in the active workspace.");
         return;
       }
+      if (a.id === "tax-tracker") {
+        navigate("hotel-tax");
+        await WorkspaceStore.flush();
+        return;
+      }
       document.querySelector("#dialog-content").innerHTML =
         `${appIcon(a)}<h2>${a.name}</h2><p>This is an example shortcut. The ${a.name.toLowerCase()} Mini App hasn’t been built yet.</p><button class="btn primary" data-close>Back to home</button>`;
       document.querySelector("dialog").showModal();
@@ -735,6 +804,9 @@ window.addEventListener("hashchange", () => {
   if (cloudReady) navigate(location.hash.slice(1));
 });
 systemTheme.addEventListener("change", applyAppearance);
+forcedColors.addEventListener("change", () => {
+  if (cloudReady && route === "appearance") render();
+});
 document
   .querySelectorAll("[data-icon]")
   .forEach((el) => (el.innerHTML = icon(el.dataset.icon)));
@@ -749,6 +821,8 @@ function workspaceSaved(message) {
 }
 function switchWorkspace(workspaceId) {
   try {
+    usernameMatch = null;
+    hotelTax?.cancel();
     WorkspaceContext.switchTo(workspaceId, () => {
       draft = null;
       main.replaceChildren();
@@ -789,7 +863,7 @@ function workspaceSettings() {
     owner = WorkspaceStore.role() === "owner",
     business = w.business;
   return `<section class="panel"><div class="panel-title"><h2>${esc(w.name)}</h2><span class="badge">${owner ? "Owner" : "Member"}${w.example ? " · Example" : ""}</span></div><p>Business information belongs to this workspace.</p><div class="prototype-note">Cloud workspace · Membership enforced by database permissions.</div><form id="workspace-business-form"><fieldset ${owner ? "" : "disabled"}><div class="form-grid"><div class="wide"><label class="form-label" for="business-name">Workspace / business name</label><input id="business-name" name="name" value="${esc(w.name)}" maxlength="80" required></div><div><label class="form-label" for="business-email">Business email</label><input id="business-email" name="email" type="email" maxlength="254" value="${esc(business.email)}" autocomplete="email"></div><div><label class="form-label" for="business-phone">Phone</label><input id="business-phone" name="phone" type="tel" maxlength="40" value="${esc(business.phone)}" autocomplete="tel"></div><div class="wide"><label class="form-label" for="business-address">Business address</label><textarea id="business-address" name="address" maxlength="300" rows="2" autocomplete="street-address">${esc(business.address)}</textarea></div></div><p class="form-error" role="alert"></p>${owner ? '<button class="btn primary" type="submit">Save business information</button>' : ""}</fieldset></form>${owner ? "" : '<p class="workspace-help">Only the owner can edit business information and manage membership.</p>'}</section>
- <section class="panel"><h2>Enabled Mini Apps</h2><p>Workspace-wide availability. Hiding your personal shortcut never changes this list.</p>${apps.map((a) => `<div class="detail-row"><div><strong>${a.name}</strong><p class="example-caption">Example Mini App</p></div><label class="toggle-label"><input type="checkbox" data-enable="${a.id}" ${w.enabledApps.includes(a.id) ? "checked" : ""} ${owner ? "" : "disabled"}><span>Enabled</span></label></div>`).join("")}${owner ? "" : '<p class="workspace-help">Members use the Mini Apps enabled by the owner.</p>'}</section>
+ <section class="panel"><h2>Enabled Mini Apps</h2><p>Workspace-wide availability. Hiding your personal shortcut never changes this list.</p>${apps.map((a) => `<div class="detail-row"><div><strong>${a.name}</strong><p class="example-caption">${a.id === "tax-tracker" ? "Hotel Tax Calculator" : "Example Mini App"}</p></div><label class="toggle-label"><input type="checkbox" data-enable="${a.id}" ${w.enabledApps.includes(a.id) ? "checked" : ""} ${owner ? "" : "disabled"}><span>Enabled</span></label></div>`).join("")}${owner ? "" : '<p class="workspace-help">Members use the Mini Apps enabled by the owner.</p>'}</section>
  <section class="panel"><h2>Members</h2><p>Owners manage the business. Members use its enabled Mini Apps.</p>${WorkspaceStore.members()
    .map(
      (m) =>
@@ -797,7 +871,7 @@ function workspaceSettings() {
    )
    .join(
      "",
-   )}${owner ? `<form id="member-form"><label class="form-label" for="member-id">Existing user ID</label><input id="member-id" name="user_id" required pattern="[0-9a-fA-F-]{36}" placeholder="User UUID"><p class="workspace-help">Ask the registered user for their account ID. Adding them grants access immediately.</p><p class="form-error" role="alert"></p><button class="btn" type="submit">Add member</button></form>` : ""}</section>`;
+   )}${owner ? `<form id="member-form"><label class="form-label" for="member-id">Username or user ID</label><input id="member-id" name="user_id" required maxlength="36" placeholder="e.g. samhull"><p class="workspace-help">Enter an exact username to find the account, then confirm. A user ID can still be added directly.</p><p class="form-error" role="alert"></p><button class="btn" type="submit">Find user / add by ID</button></form>` : ""}</section>`;
 }
 document.addEventListener("submit", async (event) => {
   const form = event.target;
@@ -806,6 +880,8 @@ document.addEventListener("submit", async (event) => {
       "create-workspace-form",
       "workspace-business-form",
       "member-form",
+      "username-form",
+      "confirm-member-form",
     ].includes(form.id)
   )
     return;
@@ -820,8 +896,72 @@ document.addEventListener("submit", async (event) => {
       await WorkspaceStore.flush();
       render();
       workspaceSaved("Business information saved");
+    } else if (form.id === "username-form") {
+      await WorkspaceStore.setUsername(values.username);
+      if (WorkspaceStore.active()) render();
+      else emptyView();
+      toast("Username saved");
+    } else if (form.id === "confirm-member-form") {
+      const confirmed = usernameMatch;
+      if (
+        !confirmed ||
+        confirmed.workspaceId !== WorkspaceStore.active()?.id ||
+        confirmed.ownerId !== WorkspaceStore.user.id
+      )
+        throw Error("Look up this username again.");
+      setWriting(true);
+      try {
+        const result = await db.rpc("add_workspace_member_by_username", {
+          target_workspace: confirmed.workspaceId,
+          requested_username: confirmed.username,
+          expected_user_id: confirmed.user_id,
+        });
+        if (result.error) throw result.error;
+        usernameMatch = null;
+        await WorkspaceStore.initialize({
+          user: { id: WorkspaceStore.user.id, email: WorkspaceStore.user.name },
+        });
+        document.querySelector("dialog").close();
+        render();
+        toast("Member added");
+      } finally {
+        setWriting(false);
+      }
     } else {
-      await WorkspaceStore.addMember(values.user_id);
+      const value = values.user_id.trim();
+      if (
+        !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(
+          value,
+        )
+      ) {
+        const wid = WorkspaceStore.active().id,
+          uid = WorkspaceStore.user.id;
+        setWriting(true);
+        try {
+          const result = await db.rpc("lookup_workspace_username", {
+            target_workspace: wid,
+            requested_username: value.toLowerCase(),
+          });
+          if (result.error) throw result.error;
+          if (
+            WorkspaceStore.active()?.id !== wid ||
+            WorkspaceStore.user.id !== uid
+          )
+            return;
+          const match = result.data?.[0];
+          if (!match) throw Error("No account has that username.");
+          if (WorkspaceStore.members().some((m) => m.userId === match.user_id))
+            throw Error("This user is already in the workspace.");
+          usernameMatch = { ...match, workspaceId: wid, ownerId: uid };
+          document.querySelector("#dialog-content").innerHTML =
+            `<h2>Add Member?</h2><p>Add <strong>${esc(match.username)}</strong> to ${esc(WorkspaceStore.active().name)}?</p><p>User ID: ${esc(match.user_id)}</p><form id="confirm-member-form"><p class="form-error" role="alert"></p><button class="btn primary" type="submit">Confirm add Member</button></form>`;
+          document.querySelector("dialog").showModal();
+        } finally {
+          setWriting(false);
+        }
+        return;
+      }
+      await WorkspaceStore.addMember(value);
       render();
       workspaceSaved("Member added");
     }
@@ -856,10 +996,14 @@ function emptyView() {
   document.querySelector("#workspace-switcher").hidden = true;
   document.querySelector(".avatar").hidden = true;
   main.innerHTML =
-    '<section class="panel"><h1>Your first workspace</h1><p>Create a new cloud workspace, or ask an owner to add your user ID.</p><p id="account-id"></p><button class="btn primary" data-new-workspace>Create workspace</button><button class="btn" id="sign-out">Sign out</button></section>';
+    '<section class="panel"><h1>Your first workspace</h1><p>Create a new cloud workspace, or ask an owner to add your user ID.</p><p id="account-id"></p><button class="btn primary" data-new-workspace>Create workspace</button></section>';
   document.querySelector("#account-id").textContent = WorkspaceStore.user.id;
+  main.insertAdjacentHTML("beforeend", account());
 }
 function gate(message = "") {
+  usernameMatch = null;
+  hotelTax?.cancel();
+  if (route === "hotel-tax") route = "home";
   WorkspaceStore.invalidate();
   for (const k of ["theme", "accent", "wallpaper", "density", "layout"])
     prefs[k] = defaults[k];

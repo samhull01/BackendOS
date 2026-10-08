@@ -2,7 +2,8 @@
 
 BackendOS keeps the original workspace shell and example shortcuts. Authentication,
 workspaces, membership, personal appearance, and workspace-specific personal homepages
-now use Supabase. Mini Apps and provider connections are still placeholders.
+now use Supabase. Hotel Tax Calculator is the first functional Mini App; the other
+Mini Apps and provider connections remain placeholders.
 
 ## Configure and run
 
@@ -120,3 +121,84 @@ Before merging/deploying, manually validate on your configured project with two 
 Local PostgreSQL tests exercise cross-workspace reads/writes, self-joining, role escalation,
 owner/member controls, private appearance/homepages, membership revocation, and anonymous denial.
 Hosted integration and email delivery require your migration/Auth settings and working network access.
+
+## Hotel Tax Calculator
+
+Review and apply `supabase/migrations/20261007235134_hotel_tax_calculator.sql` after
+the foundation migration using the manual/CLI workflow above. This PR does not
+apply remote migrations, merge, or deploy. Both new tables enable RLS and have
+explicit authenticated grants; anonymous access is revoked. Keep `backendos_private`
+out of exposed schemas. No additional environment variables or secret keys are needed.
+
+Open Hotel Tax Calculator from the home shortcut (or add the shortcut from App
+library). It uses the existing `tax-tracker` app ID, so enabled apps and personal
+shortcut order/visibility are preserved. Settings holds workspace rates, while
+Entries and rates save to Supabase; there is no Data menu, export, backup, restore,
+or bulk-clear UI. Entry forms open only when needed.
+The app follows personal theme/accent settings and never reads the old hotel tracker
+or BackendOS browser storage.
+
+- Owners and Members can view, add, and edit guest entries.
+- Only Owners can change rates or delete entries.
+- Workspace and entry IDs cannot be reassigned through UPDATE, even between workspaces
+  that a user owns. Every read/write is scoped to the active workspace. Disabled apps
+  retain their records but RLS blocks access until the Owner enables the app again.
+- Refresh reloads records and checks current workspace access. Switches, navigation,
+  and authentication changes clear drafts/data and reject stale responses. Removing
+  membership blocks subsequent requests; already-rendered records clear on refresh.
+
+Calculations match the attached v5 app: Thursday guests × Thursday cost + weekend
+guests × weekend cost; tax is that charge × tax rate; discount is a percentage of
+**tax**, not revenue. Charged/free guest counts are separate attendance statistics,
+with actual guests = charged + free. Half guests are supported. Rates recalculate
+all historical periods. Defaults are $319.60 / $282.00 / 6% tax / 1% discount.
+Like v5, **Year to Date** includes the entire selected calendar year, including any
+future-dated entries. Values are rounded only for currency display/export.
+
+The original versioned migration retains its restore RPC for migration-history
+compatibility; the frontend no longer calls it. Previously applied migrations are
+not rewritten. No database change is needed to remove the Data menu.
+
+Appearance tokens, including the browser's native light/dark color scheme, resolve
+on the HTML root. Light and Dark override the system preference; System follows
+changes to it. Accent selection remains personal and applies across workspaces.
+In Edge, Windows contrast themes/forced colors can override site colors by design;
+the app keeps that accessibility behavior rather than forcing a custom palette and
+explains it in Appearance when detected. Dark Reader and similar extensions can
+also override the app palette; disable the extension for this site to use the
+selected accent and Light/Dark/System theme.
+
+`npm test` covers formula parity, validation, calculator browser CRUD/rates,
+failed writes/loads, period views, persistence, two-account/two-workspace
+UI separation, Member controls, stale requests, and pagination, plus foundation
+regressions, rendered accent colors, and Light/Dark/System switching. `npm run test:rls` applies all migrations to disposable PostgreSQL 17
+and tests actual grants/RLS, including cross-workspace reads/writes, immutable IDs,
+Owner/Member permissions, disabled apps, revocation, anonymous denial, and atomic
+restore rollback. Browser tests serve the built `dist/` files with a simulated API; hosted Auth/PostgREST/SMTP
+validation remains a pre-release check and no live project data is changed.
+
+## Usernames and membership
+
+Apply `supabase/migrations/20261008005026_usernames.sql` once, after the foundation
+migration, to the same Supabase project used by the preview. Do not rerun earlier
+migrations. This migration is not applied remotely by this PR. It adds `user_profiles`
+with explicit grants and RLS, plus exact-username lookup and membership RPCs.
+
+Users choose a unique username in Settings → Account (also available before joining
+a workspace). Names are normalized to lowercase, 3–30 characters, starting with a
+letter and containing only letters, numbers, and underscores. Changing a name leaves
+the account UUID and all memberships unchanged; the old name becomes available.
+Existing accounts can continue sharing their user UUID until they choose a name.
+
+Owners enter an exact username in Settings → Workspace → Members, check the matched
+username/account ID and target workspace, then confirm. The database rechecks both
+the Owner's authority and the confirmed UUID. A changed or reclaimed username requires
+a fresh lookup. Existing UUID-based addition remains available. Lookup returns no
+email and has no prefix search or directory endpoint. A user can read their own
+profile and those of people sharing a workspace; unrelated profiles remain hidden.
+Only a workspace Owner can look up an otherwise hidden exact username. This is a
+membership convenience, not a change to UUID-based authorization.
+
+Built-browser and PostgreSQL tests cover duplicates, case normalization, exact lookup,
+confirmation before membership, stale matches, Member/outsider/anonymous denial,
+private profile reads and writes, username changes, and membership preservation.
