@@ -11,3 +11,4 @@ for migration in supabase/migrations/*.sql; do
 done
 docker exec -i "$name" psql -U postgres -v ON_ERROR_STOP=1 < tests/rls.sql
 docker exec -i "$name" psql -U postgres -v ON_ERROR_STOP=1 < tests/hotel-tax-rls.sql
+docker exec -i "$name" psql -U postgres -v ON_ERROR_STOP=1 < tests/usernames-rls.sql

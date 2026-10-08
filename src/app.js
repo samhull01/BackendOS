@@ -33,7 +33,7 @@ const WorkspaceStore = (() => {
   async function initialize(session) {
     const epoch = ++loadEpoch;
     const loadedUser = { id: session.user.id, name: session.user.email };
-    const [ws, ms, hs, ps] = await Promise.all([
+    const [ws, ms, hs, ps, profiles, ownProfile] = await Promise.all([
       db.from("workspaces").select("*"),
       db.from("workspace_members").select("*"),
       db.from("workspace_homes").select("*"),
@@ -42,9 +42,15 @@ const WorkspaceStore = (() => {
         .select("*")
         .eq("user_id", loadedUser.id)
         .maybeSingle(),
+      db.from("user_profiles").select("*"),
+      db.from("user_profiles").select("*").eq("user_id", loadedUser.id),
     ]);
     if (epoch !== loadEpoch) return;
-    user = loadedUser;
+    const profileRows = check(profiles);
+    user = {
+      ...loadedUser,
+      username: check(ownProfile)[0]?.username || "",
+    };
     state.workspaces = check(ws).map((w) => ({
       ...w,
       enabledApps: w.enabled_apps,
@@ -53,7 +59,9 @@ const WorkspaceStore = (() => {
       ...m,
       workspaceId: m.workspace_id,
       userId: m.user_id,
-      name: m.user_id === user.id ? user.name : m.user_id,
+      name:
+        profileRows.find((p) => p.user_id === m.user_id)?.username ||
+        (m.user_id === user.id ? user.name : m.user_id),
     }));
     state.homes = check(hs).map((h) => ({
       ...h,
@@ -197,6 +205,26 @@ const WorkspaceStore = (() => {
       setWriting(false);
     }
   }
+  async function setUsername(value) {
+    const username = value.trim().toLowerCase();
+    if (!/^[a-z][a-z0-9_]{2,29}$/.test(username))
+      throw Error(
+        "Use 3–30 characters: start with a letter, then letters, numbers, or underscores.",
+      );
+    setWriting(true);
+    try {
+      const q = user.username
+        ? db.from("user_profiles").update({ username }).eq("user_id", user.id)
+        : db.from("user_profiles").insert({ user_id: user.id, username });
+      const result = await q.select("*").single();
+      if (result.error?.code === "23505")
+        throw Error("That username is already taken.");
+      check(result);
+      await initialize({ user: { id: user.id, email: user.name } });
+    } finally {
+      setWriting(false);
+    }
+  }
   async function removeMember(id) {
     setWriting(true);
     try {
@@ -242,6 +270,7 @@ const WorkspaceStore = (() => {
     saveAppearance,
     flush,
     addMember,
+    setUsername,
     removeMember,
     members: () =>
       state.members.filter((m) => m.workspaceId === state.activeWorkspaceId),
@@ -416,6 +445,7 @@ const esc = (value) =>
   );
 const workspaceApps = () =>
   apps.filter((a) => WorkspaceStore.active().enabledApps.includes(a.id));
+let usernameMatch = null;
 let draft = null,
   route = "home";
 const main = document.querySelector("main"),
@@ -552,7 +582,7 @@ function appearance() {
   )}<p class="setting-help">Compact shows app names. Detailed adds a short description.</p></div></section><p style="margin-top:18px;font-size:14px">Your appearance is personal and stays consistent across workspaces. Preferences are saved privately to your account.</p>`;
 }
 function account() {
-  return `<section class="panel"><h2>BackendOS account</h2><div class="detail-row"><strong>Email</strong><span>${esc(WorkspaceStore.user.name)}</span></div><div class="detail-row"><strong>Your user ID</strong><span>${esc(WorkspaceStore.user.id)}</span></div><p>Share your user ID with a workspace owner to join their workspace.</p><button class="btn" id="sign-out">Sign out</button></section>`;
+  return `<section class="panel"><h2>BackendOS account</h2><div class="detail-row"><strong>Email</strong><span>${esc(WorkspaceStore.user.name)}</span></div><div class="detail-row"><strong>Your user ID</strong><span>${esc(WorkspaceStore.user.id)}</span></div><form id="username-form"><label class="form-label" for="account-username">Username</label><input id="account-username" name="username" value="${esc(WorkspaceStore.user.username)}" required minlength="3" maxlength="30" pattern="[A-Za-z][A-Za-z0-9_]{2,29}" autocomplete="username" placeholder="e.g. samhull"><p>3–30 letters, numbers, or underscores; start with a letter. Usernames are unique and ignore capitalization. Changing yours keeps your memberships.</p><p class="form-error" role="alert"></p><button class="btn primary" type="submit">Save username</button></form><p>Share your username (or user ID) with a workspace Owner to join their workspace.</p><button class="btn" id="sign-out">Sign out</button></section>`;
 }
 function connections() {
   return `<section class="panel"><h2>Connected accounts</h2><p>Manage the services used by your Mini Apps.</p>${[
@@ -791,6 +821,7 @@ function workspaceSaved(message) {
 }
 function switchWorkspace(workspaceId) {
   try {
+    usernameMatch = null;
     hotelTax?.cancel();
     WorkspaceContext.switchTo(workspaceId, () => {
       draft = null;
@@ -840,7 +871,7 @@ function workspaceSettings() {
    )
    .join(
      "",
-   )}${owner ? `<form id="member-form"><label class="form-label" for="member-id">Existing user ID</label><input id="member-id" name="user_id" required pattern="[0-9a-fA-F-]{36}" placeholder="User UUID"><p class="workspace-help">Ask the registered user for their account ID. Adding them grants access immediately.</p><p class="form-error" role="alert"></p><button class="btn" type="submit">Add member</button></form>` : ""}</section>`;
+   )}${owner ? `<form id="member-form"><label class="form-label" for="member-id">Username or user ID</label><input id="member-id" name="user_id" required maxlength="36" placeholder="e.g. samhull"><p class="workspace-help">Enter an exact username to find the account, then confirm. A user ID can still be added directly.</p><p class="form-error" role="alert"></p><button class="btn" type="submit">Find user / add by ID</button></form>` : ""}</section>`;
 }
 document.addEventListener("submit", async (event) => {
   const form = event.target;
@@ -849,6 +880,8 @@ document.addEventListener("submit", async (event) => {
       "create-workspace-form",
       "workspace-business-form",
       "member-form",
+      "username-form",
+      "confirm-member-form",
     ].includes(form.id)
   )
     return;
@@ -863,8 +896,72 @@ document.addEventListener("submit", async (event) => {
       await WorkspaceStore.flush();
       render();
       workspaceSaved("Business information saved");
+    } else if (form.id === "username-form") {
+      await WorkspaceStore.setUsername(values.username);
+      if (WorkspaceStore.active()) render();
+      else emptyView();
+      toast("Username saved");
+    } else if (form.id === "confirm-member-form") {
+      const confirmed = usernameMatch;
+      if (
+        !confirmed ||
+        confirmed.workspaceId !== WorkspaceStore.active()?.id ||
+        confirmed.ownerId !== WorkspaceStore.user.id
+      )
+        throw Error("Look up this username again.");
+      setWriting(true);
+      try {
+        const result = await db.rpc("add_workspace_member_by_username", {
+          target_workspace: confirmed.workspaceId,
+          requested_username: confirmed.username,
+          expected_user_id: confirmed.user_id,
+        });
+        if (result.error) throw result.error;
+        usernameMatch = null;
+        await WorkspaceStore.initialize({
+          user: { id: WorkspaceStore.user.id, email: WorkspaceStore.user.name },
+        });
+        document.querySelector("dialog").close();
+        render();
+        toast("Member added");
+      } finally {
+        setWriting(false);
+      }
     } else {
-      await WorkspaceStore.addMember(values.user_id);
+      const value = values.user_id.trim();
+      if (
+        !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(
+          value,
+        )
+      ) {
+        const wid = WorkspaceStore.active().id,
+          uid = WorkspaceStore.user.id;
+        setWriting(true);
+        try {
+          const result = await db.rpc("lookup_workspace_username", {
+            target_workspace: wid,
+            requested_username: value.toLowerCase(),
+          });
+          if (result.error) throw result.error;
+          if (
+            WorkspaceStore.active()?.id !== wid ||
+            WorkspaceStore.user.id !== uid
+          )
+            return;
+          const match = result.data?.[0];
+          if (!match) throw Error("No account has that username.");
+          if (WorkspaceStore.members().some((m) => m.userId === match.user_id))
+            throw Error("This user is already in the workspace.");
+          usernameMatch = { ...match, workspaceId: wid, ownerId: uid };
+          document.querySelector("#dialog-content").innerHTML =
+            `<h2>Add Member?</h2><p>Add <strong>${esc(match.username)}</strong> to ${esc(WorkspaceStore.active().name)}?</p><p>User ID: ${esc(match.user_id)}</p><form id="confirm-member-form"><p class="form-error" role="alert"></p><button class="btn primary" type="submit">Confirm add Member</button></form>`;
+          document.querySelector("dialog").showModal();
+        } finally {
+          setWriting(false);
+        }
+        return;
+      }
+      await WorkspaceStore.addMember(value);
       render();
       workspaceSaved("Member added");
     }
@@ -899,10 +996,12 @@ function emptyView() {
   document.querySelector("#workspace-switcher").hidden = true;
   document.querySelector(".avatar").hidden = true;
   main.innerHTML =
-    '<section class="panel"><h1>Your first workspace</h1><p>Create a new cloud workspace, or ask an owner to add your user ID.</p><p id="account-id"></p><button class="btn primary" data-new-workspace>Create workspace</button><button class="btn" id="sign-out">Sign out</button></section>';
+    '<section class="panel"><h1>Your first workspace</h1><p>Create a new cloud workspace, or ask an owner to add your user ID.</p><p id="account-id"></p><button class="btn primary" data-new-workspace>Create workspace</button></section>';
   document.querySelector("#account-id").textContent = WorkspaceStore.user.id;
+  main.insertAdjacentHTML("beforeend", account());
 }
 function gate(message = "") {
+  usernameMatch = null;
   hotelTax?.cancel();
   if (route === "hotel-tax") route = "home";
   WorkspaceStore.invalidate();

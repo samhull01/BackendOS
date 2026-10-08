@@ -444,3 +444,138 @@ test("appearance changes recolor the shell, persist privately and follow system 
       "#c56740",
     );
   }));
+
+test("usernames save privately and Owners confirm exact matches before membership", () =>
+  harness(async (page) => {
+    await page.evaluate(() => {
+      tables.workspace_members = tables.workspace_members.filter(
+        (m) => !(m.workspace_id === "A" && m.user_id === "user-b"),
+      );
+      tables.user_profiles = [{ user_id: "user-b", username: "bob" }];
+    });
+    await signin(page, "a@example.com");
+    await page.locator('.dock [data-route="appearance"]').click();
+    await page.locator('.settings-nav [data-route="account"]').click();
+    await page.locator("#account-username").fill("Alice");
+    await page.locator("#username-form button").click();
+    await page.waitForFunction(() =>
+      tables.user_profiles.some(
+        (p) => p.user_id === "user-a" && p.username === "alice",
+      ),
+    );
+    await page.waitForFunction(
+      () =>
+        document.querySelector("main").getAttribute("aria-busy") === "false",
+    );
+    await page.locator("#account-username").fill("BoB");
+    await page.locator("#username-form button").click();
+    await page
+      .getByText("That username is already taken.", { exact: true })
+      .waitFor();
+    assert.equal(
+      await page.evaluate(
+        () => tables.user_profiles.find((p) => p.user_id === "user-a").username,
+      ),
+      "alice",
+    );
+    await page.locator('.settings-nav [data-route="workspace"]').click();
+    await page.locator("#member-id").fill("bo");
+    await page.locator("#member-form button").click();
+    await page
+      .getByText("No account has that username.", { exact: true })
+      .waitFor();
+    await page.locator("#member-id").fill("BOB");
+    await page.locator("#member-form button").click();
+    await page.locator("#confirm-member-form").waitFor();
+    assert.equal(
+      await page.evaluate(() =>
+        tables.workspace_members.some(
+          (m) => m.workspace_id === "A" && m.user_id === "user-b",
+        ),
+      ),
+      false,
+    );
+    // A renamed account invalidates the pending confirmation rather than granting an unintended user access.
+    await page.evaluate(
+      () =>
+        (tables.user_profiles.find((p) => p.user_id === "user-b").username =
+          "robert"),
+    );
+    await page.locator("#confirm-member-form button").click();
+    await page
+      .getByText("Username changed or was not found. Look it up again.", {
+        exact: true,
+      })
+      .waitFor();
+    await page.locator("dialog .close").click();
+    await page.locator("#member-id").fill("ROBERT");
+    await page.locator("#member-form button").click();
+    await page.locator("#confirm-member-form").waitFor();
+    await page.locator("#confirm-member-form button").click();
+    await page.waitForFunction(() =>
+      tables.workspace_members.some(
+        (m) =>
+          m.workspace_id === "A" &&
+          m.user_id === "user-b" &&
+          m.role === "member",
+      ),
+    );
+    await page.waitForFunction(
+      () =>
+        document.querySelector("main").getAttribute("aria-busy") === "false",
+    );
+    await signout(page);
+    await signin(page, "b@example.com");
+    await page.locator('.dock [data-route="appearance"]').click();
+    await page.locator('.settings-nav [data-route="workspace"]').click();
+    assert.equal(await page.locator("#member-form").count(), 0);
+    await page.locator('.settings-nav [data-route="account"]').click();
+    assert.equal(
+      await page.locator("#account-username").inputValue(),
+      "robert",
+    );
+    await page.locator("#account-username").fill("bob_new");
+    await page.locator("#username-form button").click();
+    await page.waitForFunction(
+      () =>
+        tables.user_profiles.find((p) => p.user_id === "user-b").username ===
+        "bob_new",
+    );
+    assert.equal(
+      await page.evaluate(() =>
+        tables.workspace_members.some(
+          (m) => m.workspace_id === "A" && m.user_id === "user-b",
+        ),
+      ),
+      true,
+    );
+  }));
+
+test("accounts can choose a username before joining any workspace", () =>
+  harness(async (page) => {
+    await page.evaluate(() => {
+      tables.workspaces = [];
+      tables.workspace_members = [];
+      tables.workspace_homes = [];
+    });
+    await page.locator("#auth-email").fill("a@example.com");
+    await page.locator("#auth-password").fill("password123");
+    await page.locator("#auth-form button").click();
+    await page.getByRole("heading", { name: "Your first workspace" }).waitFor();
+    await page.locator("#account-username").fill("new_user");
+    await page.locator("#username-form button").click();
+    await page.waitForFunction(
+      () =>
+        tables.user_profiles.find((p) => p.user_id === "user-a")?.username ===
+        "new_user",
+    );
+    await page.waitForFunction(
+      () =>
+        document.querySelector("main").getAttribute("aria-busy") === "false",
+    );
+    assert.equal(
+      await page.locator("#account-username").inputValue(),
+      "new_user",
+    );
+    assert.equal(await page.locator("#sign-out").count(), 1);
+  }));

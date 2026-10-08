@@ -176,3 +176,29 @@ and tests actual grants/RLS, including cross-workspace reads/writes, immutable I
 Owner/Member permissions, disabled apps, revocation, anonymous denial, and atomic
 restore rollback. Browser tests serve the built `dist/` files with a simulated API; hosted Auth/PostgREST/SMTP
 validation remains a pre-release check and no live project data is changed.
+
+## Usernames and membership
+
+Apply `supabase/migrations/20261008005026_usernames.sql` once, after the foundation
+migration, to the same Supabase project used by the preview. Do not rerun earlier
+migrations. This migration is not applied remotely by this PR. It adds `user_profiles`
+with explicit grants and RLS, plus exact-username lookup and membership RPCs.
+
+Users choose a unique username in Settings → Account (also available before joining
+a workspace). Names are normalized to lowercase, 3–30 characters, starting with a
+letter and containing only letters, numbers, and underscores. Changing a name leaves
+the account UUID and all memberships unchanged; the old name becomes available.
+Existing accounts can continue sharing their user UUID until they choose a name.
+
+Owners enter an exact username in Settings → Workspace → Members, check the matched
+username/account ID and target workspace, then confirm. The database rechecks both
+the Owner's authority and the confirmed UUID. A changed or reclaimed username requires
+a fresh lookup. Existing UUID-based addition remains available. Lookup returns no
+email and has no prefix search or directory endpoint. A user can read their own
+profile and those of people sharing a workspace; unrelated profiles remain hidden.
+Only a workspace Owner can look up an otherwise hidden exact username. This is a
+membership convenience, not a change to UUID-based authorization.
+
+Built-browser and PostgreSQL tests cover duplicates, case normalization, exact lookup,
+confirmation before membership, stale matches, Member/outsider/anonymous denial,
+private profile reads and writes, username changes, and membership preservation.

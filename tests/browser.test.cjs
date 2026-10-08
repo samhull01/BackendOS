@@ -4,7 +4,7 @@ const { chromium } = require("playwright-core");
 const { readFileSync } = require("node:fs");
 const http = require("node:http");
 const mock = `
-window.calls=[];window.tables={workspaces:[],workspace_members:[],workspace_homes:[],user_preferences:[]};
+window.calls=[];window.tables={workspaces:[],workspace_members:[],workspace_homes:[],user_preferences:[],user_profiles:[]};
 let callback;let current=null;
 const session=email=>({user:{id:email==='a@example.com'?'user-a':'user-b',email}});
 window.supabaseClient={auth:{
@@ -18,7 +18,7 @@ window.supabaseClient={auth:{
  },
  async rpc(name,args){calls.push([name,args]);const id='w'+(tables.workspaces.length+1);tables.workspaces.push({id,name:args.workspace_name,business:{email:'',phone:'',address:''},enabled_apps:['documents','customers']});tables.workspace_members.push({workspace_id:id,user_id:current.user.id,role:'owner'});return {data:id}},
  from(table){let op='select',payload,filters=[];const q={select(){return q},eq(k,v){filters.push([k,v]);return q},maybeSingle(){return q},single(){return q},update(v){op='update';payload=v;return q},upsert(v){op='upsert';payload=v;return q},insert(v){op='insert';payload=v;return q},delete(){op='delete';return q},then(resolve){calls.push([table,op]);if(window.failWrite&&op!=='select'){window.failWrite=false;return Promise.resolve({error:{message:'Write denied'}}).then(resolve)}
- const uid=current.user.id;const rows=tables[table];const allowed=rows.filter(r=>table==='user_preferences'||table==='workspace_homes'?r.user_id===uid:table==='workspaces'?tables.workspace_members.some(m=>m.workspace_id===r.id&&m.user_id===uid):tables.workspace_members.some(m=>m.workspace_id===r.workspace_id&&m.user_id===uid));let data=allowed.filter(r=>filters.every(([k,v])=>r[k]===v));
+ const uid=current.user.id;const rows=tables[table];const allowed=rows.filter(r=>table==='user_profiles'||table==='user_preferences'||table==='workspace_homes'?r.user_id===uid:table==='workspaces'?tables.workspace_members.some(m=>m.workspace_id===r.id&&m.user_id===uid):tables.workspace_members.some(m=>m.workspace_id===r.workspace_id&&m.user_id===uid));let data=allowed.filter(r=>filters.every(([k,v])=>r[k]===v));
  if(op==='update'){data.forEach(r=>Object.assign(r,payload));data=data[0]||null}
  if(op==='upsert'){let r=rows.find(r=>r.user_id===payload.user_id&&r.workspace_id===payload.workspace_id);if(r)Object.assign(r,payload);else rows.push(payload);data=payload}
  if(op==='insert'){rows.push(payload);data=payload}if(table==='user_preferences'&&op==='select')data=data[0]||null;
