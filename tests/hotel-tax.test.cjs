@@ -34,22 +34,7 @@ test("v5 formula, half guests, discount on tax and calendar-year view", () => {
   );
   assert.equal(tax.summarize([], tax.defaults).due, 0);
 });
-test("strict backup validation refuses prototype data and removes identities", () => {
-  assert.throws(() =>
-    tax.validateBackup({
-      app: "Hotel Tax Tracker",
-      version: 1,
-      entries: [entry],
-      settings: tax.defaults,
-    }),
-  );
-  const valid = tax.validateBackup({
-    app: "BackendOS Hotel Tax Calculator",
-    version: 2,
-    entries: [{ ...entry, id: "old-id", workspace_id: "foreign" }],
-    settings: tax.defaults,
-  });
-  assert.deepEqual(valid.entries, [entry]);
+test("guest entry validation rejects invalid dates and counts", () => {
   for (const change of [
     { date: "2026-02-30" },
     { thursday_guests: -1 },
@@ -59,13 +44,4 @@ test("strict backup validation refuses prototype data and removes identities", (
     { name: " " },
   ])
     assert.throws(() => tax.validateEntry({ ...entry, ...change }));
-});
-test("CSV preserves quote/newline names and neutralizes spreadsheet formulas", () => {
-  const output = tax.csv(
-    [{ ...entry, name: '=HYPERLINK("bad")\nnext' }],
-    tax.defaults,
-  );
-  assert.ok(output.includes('"\'=HYPERLINK(""bad"")\nnext"'));
-  assert.ok(output.includes('"due","61.98"'));
-  assert.ok(output.includes('"1043.40"'));
 });

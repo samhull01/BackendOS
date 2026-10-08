@@ -4,7 +4,6 @@ const { chromium } = require("playwright-core");
 const { readFileSync } = require("node:fs");
 const http = require("node:http");
 const mock = require("./helpers/hotel-mock.cjs");
-const defaults = require("../src/hotel-tax.js").defaults;
 async function harness(fn) {
   const server = http.createServer((req, res) => {
     res.setHeader(
@@ -60,10 +59,8 @@ async function signout(page) {
   await page.locator("#sign-out").click();
   await page.locator("#auth-email").waitFor();
 }
-async function downloadText(download) {
-  return readFileSync(await download.path(), "utf8");
-}
-test("calculator CRUD, rates, exports, safe restore, filters and persistence in the shell", () =>
+
+test("calculator cloud CRUD, rates, filters and persistence without Data tools", () =>
   harness(async (page) => {
     await signin(page, "a@example.com");
     await open(page);
@@ -122,54 +119,15 @@ test("calculator CRUD, rates, exports, safe restore, filters and persistence in 
     );
     await page.locator('#hotel-entry-form button[type="submit"]').click();
     await page.getByText("Updated group", { exact: true }).waitFor();
-    await page.locator(".hotel-data summary").click();
-    let waiting = page.waitForEvent("download");
-    await page.locator('[data-hotel="csv"]').click();
-    const csv = await downloadText(await waiting);
-    assert.ok(csv.includes("Updated group"));
-    assert.ok(csv.includes('"due","51.32"'));
-    waiting = page.waitForEvent("download");
-    await page.locator('[data-hotel="backup"]').click();
-    const backup = JSON.parse(await downloadText(await waiting));
-    assert.equal(backup.app, "BackendOS Hotel Tax Calculator");
-    assert.equal(backup.entries.length, 1);
-    assert.equal(backup.entries[0].workspace_id, undefined);
-    page.on("dialog", (d) => d.accept());
-    await page.locator("#hotel-restore-file").setInputFiles({
-      name: "prototype.json",
-      mimeType: "application/json",
-      buffer: Buffer.from(
-        JSON.stringify({
-          app: "Hotel Tax Tracker",
-          version: 1,
-          entries: [],
-          settings: defaults,
-        }),
-      ),
-    });
-    await page
-      .getByText(
-        "Choose a BackendOS Hotel Tax Calculator v2 backup. Prototype backups are not imported.",
-        { exact: true },
-      )
-      .waitFor();
     assert.equal(
-      await page.evaluate(
-        () => calls.filter((c) => c.name === "restore_hotel_tax").length,
-      ),
+      await page
+        .locator(
+          ".hotel-data,#hotel-restore-file,[data-hotel=csv],[data-hotel=backup],[data-hotel=restore],[data-hotel=clear]",
+        )
+        .count(),
       0,
     );
-    await page.locator("#hotel-restore-file").setInputFiles({
-      name: "backup.json",
-      mimeType: "application/json",
-      buffer: Buffer.from(
-        JSON.stringify({
-          ...backup,
-          entries: [{ ...backup.entries[0], name: "Restored group" }],
-        }),
-      ),
-    });
-    await page.getByText("Restored group", { exact: true }).waitFor();
+    page.on("dialog", (d) => d.accept());
     await page.locator("#hotel-mode").selectOption("year");
     await page.locator("#hotel-period").fill("2025");
     await page.locator("#hotel-period").dispatchEvent("change");
@@ -178,7 +136,7 @@ test("calculator CRUD, rates, exports, safe restore, filters and persistence in 
     );
     await page.locator("#hotel-period").fill("2026");
     await page.locator("#hotel-period").dispatchEvent("change");
-    await page.getByText("Restored group", { exact: true }).waitFor();
+    await page.getByText("Updated group", { exact: true }).waitFor();
     const persisted = await page.evaluate(() => structuredClone(tables));
     await page.route("**/client.js", (route) =>
       route.fulfill({
@@ -190,7 +148,7 @@ test("calculator CRUD, rates, exports, safe restore, filters and persistence in 
     await page.reload();
     await signin(page, "a@example.com");
     await open(page);
-    await page.getByText("Restored group", { exact: true }).waitFor();
+    await page.getByText("Updated group", { exact: true }).waitFor();
     await page.screenshot({
       path: "/tmp/hotel-tax-desktop.png",
       fullPage: true,
@@ -207,44 +165,6 @@ test("calculator CRUD, rates, exports, safe restore, filters and persistence in 
       fullPage: true,
     });
     await page.locator('[data-hotel="delete"]').click();
-    await page
-      .getByText(
-        "No guest entries for this period. Add an entry to get started.",
-        { exact: true },
-      )
-      .waitFor();
-    await page.evaluate(() => {
-      tables.hotel_tax_entries.push(
-        ...["2026-10-01", "2026-11-01"].map((date, i) => ({
-          id: "clear" + i,
-          workspace_id: "A",
-          date,
-          name: "Clear test " + i,
-          thursday_guests: 1,
-          weekend_guests: 0,
-          charged_guests: 1,
-          free_guests: 0,
-        })),
-      );
-    });
-    await page.locator('[data-hotel="refresh"]').click();
-    await page.getByText("Clear test 0", { exact: true }).waitFor();
-    await page.locator(".hotel-data summary").click();
-    await page.locator('[data-hotel="clear"]').click();
-    await page
-      .getByText(
-        "No guest entries for this period. Add an entry to get started.",
-        { exact: true },
-      )
-      .waitFor();
-    assert.deepEqual(
-      await page.evaluate(() => tables.hotel_tax_entries.map((e) => e.date)),
-      ["2026-11-01"],
-    );
-    await page.locator("#hotel-mode").selectOption("year");
-    await page.getByText("Clear test 1", { exact: true }).waitFor();
-    await page.locator(".hotel-data summary").click();
-    await page.locator('[data-hotel="clear"]').click();
     await page
       .getByText(
         "No guest entries for this period. Add an entry to get started.",
@@ -369,4 +289,158 @@ test("pagination includes entries beyond the Data API default cap", () =>
     await open(page);
     assert.equal(await page.locator(".hotel-table tbody tr").count(), 1001);
     assert.equal(await page.locator("#hotel-due").textContent(), "$19,003.22");
+  }));
+
+test("appearance changes recolor the shell, persist privately and follow system theme", () =>
+  harness(async (page) => {
+    await page.emulateMedia({ colorScheme: "light" });
+    await signin(page, "b@example.com");
+    await page.locator('.dock [data-route="appearance"]').click();
+    async function idle() {
+      await page.waitForFunction(
+        () =>
+          document.querySelector("main").getAttribute("aria-busy") === "false",
+      );
+    }
+    for (const [name, color] of [
+      ["Blue", "rgb(56, 121, 214)"],
+      ["Emerald", "rgb(39, 138, 117)"],
+      ["Terracotta", "rgb(197, 103, 64)"],
+    ]) {
+      await page
+        .getByRole("button", { name: name + " accent", exact: true })
+        .click();
+      await idle();
+      assert.equal(
+        await page
+          .locator(".brand-os")
+          .evaluate((el) => getComputedStyle(el).color),
+        color,
+      );
+      assert.equal(
+        await page
+          .locator(".settings-nav button.active")
+          .evaluate((el) => getComputedStyle(el).color),
+        color,
+      );
+    }
+    await page.emulateMedia({ forcedColors: "active" });
+    await page
+      .getByText("Your browser is enforcing a contrast palette", {
+        exact: false,
+      })
+      .waitFor();
+    await page
+      .getByRole("button", { name: "Blue accent", exact: true })
+      .click();
+    await idle();
+    assert.equal(
+      await page.evaluate(
+        () =>
+          tables.user_preferences.find((p) => p.user_id === "user-b").appearance
+            .accent,
+      ),
+      "#3879d6",
+    );
+    await page.emulateMedia({ forcedColors: "none" });
+    await page.waitForFunction(() => !document.querySelector(".notice"));
+    assert.equal(
+      await page
+        .locator(".brand-os")
+        .evaluate((el) => getComputedStyle(el).color),
+      "rgb(56, 121, 214)",
+    );
+    await page
+      .getByRole("button", { name: "Terracotta accent", exact: true })
+      .click();
+    await idle();
+    await page.locator('[data-pref="theme"][data-value="dark"]').click();
+    await idle();
+    assert.equal(
+      await page
+        .locator("html")
+        .evaluate((el) => getComputedStyle(el).colorScheme),
+      "dark",
+    );
+    assert.equal(
+      await page
+        .locator("body")
+        .evaluate((el) => getComputedStyle(el).backgroundColor),
+      "rgb(21, 23, 34)",
+    );
+    assert.equal(
+      await page.locator("h1").evaluate((el) => getComputedStyle(el).color),
+      "rgb(240, 241, 248)",
+    );
+    assert.equal(
+      await page.evaluate(() =>
+        getComputedStyle(document.documentElement).getPropertyValue(
+          "--accent-soft",
+        ),
+      ),
+      await page.evaluate(() =>
+        getComputedStyle(document.body).getPropertyValue("--accent-soft"),
+      ),
+    );
+    await page.locator('[data-pref="theme"][data-value="light"]').click();
+    await idle();
+    assert.equal(
+      await page
+        .locator("html")
+        .evaluate((el) => getComputedStyle(el).colorScheme),
+      "light",
+    );
+    assert.equal(
+      await page
+        .locator("body")
+        .evaluate((el) => getComputedStyle(el).backgroundColor),
+      "rgb(245, 246, 250)",
+    );
+    await page.locator('[data-pref="theme"][data-value="system"]').click();
+    await idle();
+    await page.emulateMedia({ colorScheme: "dark" });
+    await page.waitForFunction(
+      () => document.documentElement.dataset.dark === "true",
+    );
+    await page.emulateMedia({ colorScheme: "light" });
+    await page.waitForFunction(
+      () => document.documentElement.dataset.dark === "false",
+    );
+    await page.locator("#workspace-switcher").click();
+    await page.locator('[data-switch="B"]').click();
+    assert.equal(
+      await page
+        .locator(".brand-os")
+        .evaluate((el) => getComputedStyle(el).color),
+      "rgb(197, 103, 64)",
+    );
+    const saved = await page.evaluate(() => structuredClone(tables));
+    await page.route("**/client.js", (route) =>
+      route.fulfill({
+        contentType: "application/javascript",
+        body: mock + "\nObject.assign(tables," + JSON.stringify(saved) + ");",
+      }),
+    );
+    await page.reload();
+    await signin(page, "b@example.com");
+    assert.equal(
+      await page
+        .locator(".brand-os")
+        .evaluate((el) => getComputedStyle(el).color),
+      "rgb(197, 103, 64)",
+    );
+    await page.emulateMedia({ colorScheme: "dark" });
+    await page.waitForFunction(
+      () => document.documentElement.dataset.dark === "true",
+    );
+    await signout(page);
+    await signin(page, "a@example.com");
+    assert.equal(
+      await page.evaluate(
+        () =>
+          tables.user_preferences.find((p) => p.user_id === "user-a").appearance
+            .accent,
+      ),
+      "#c56740",
+    );
   }));

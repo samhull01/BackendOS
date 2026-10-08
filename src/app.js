@@ -419,19 +419,17 @@ const workspaceApps = () =>
 let draft = null,
   route = "home";
 const main = document.querySelector("main"),
-  systemTheme = matchMedia("(prefers-color-scheme: dark)");
+  systemTheme = matchMedia("(prefers-color-scheme: dark)"),
+  forcedColors = matchMedia("(forced-colors: active)");
 function applyAppearance() {
-  document.body.dataset.dark = String(
-    prefs.theme === "dark" || (prefs.theme === "system" && systemTheme.matches),
-  );
+  const dark =
+    prefs.theme === "dark" || (prefs.theme === "system" && systemTheme.matches);
+  document.documentElement.dataset.dark = String(dark);
+  document.body.dataset.dark = String(dark);
   document.body.dataset.wallpaper = prefs.wallpaper;
   document.body.dataset.density = prefs.density;
   document.body.dataset.layout = prefs.layout;
   document.documentElement.style.setProperty("--accent", prefs.accent);
-  document.documentElement.style.setProperty(
-    "--accent-soft",
-    `color-mix(in srgb, ${prefs.accent} 12%, var(--surface))`,
-  );
   document.querySelector('meta[name="theme-color"]').content = prefs.accent;
 }
 function save() {
@@ -526,7 +524,7 @@ function options(k, values) {
   return `<div class="segmented">${values.map(([value, label, ico]) => `<button data-pref="${k}" data-value="${value}" class="${prefs[k] === value ? "selected" : ""}" aria-pressed="${prefs[k] === value}">${ico ? icon(ico) : ""}${label}</button>`).join("")}</div>`;
 }
 function appearance() {
-  return `<section class="panel"><h2>Appearance</h2><p>A workspace that feels like yours.</p><div class="setting-row"><span class="setting-title">Theme</span>${options(
+  return `<section class="panel"><h2>Appearance</h2><p>A workspace that feels like yours.</p>${forcedColors.matches ? '<div class="notice" role="status">Your browser is enforcing a contrast palette, which overrides the selected accent and theme. To use the app’s colors, check Windows Settings → Accessibility → Contrast themes and select None. Your appearance choices are still saved.</div>' : ""}<div class="setting-row"><span class="setting-title">Theme</span>${options(
     "theme",
     [
       ["light", "Light", "sun"],
@@ -776,6 +774,9 @@ window.addEventListener("hashchange", () => {
   if (cloudReady) navigate(location.hash.slice(1));
 });
 systemTheme.addEventListener("change", applyAppearance);
+forcedColors.addEventListener("change", () => {
+  if (cloudReady && route === "appearance") render();
+});
 document
   .querySelectorAll("[data-icon]")
   .forEach((el) => (el.innerHTML = icon(el.dataset.icon)));

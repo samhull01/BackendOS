@@ -88,26 +88,6 @@
       ...validateNumbers(value, guestFields),
     };
   }
-  function validateBackup(value) {
-    if (
-      !value ||
-      value.app !== "BackendOS Hotel Tax Calculator" ||
-      value.version !== 2 ||
-      !Array.isArray(value.entries) ||
-      value.entries.length > 10000 ||
-      !value.settings ||
-      typeof value.settings !== "object"
-    )
-      throw Error(
-        "Choose a BackendOS Hotel Tax Calculator v2 backup. Prototype backups are not imported.",
-      );
-    return {
-      app: value.app,
-      version: 2,
-      settings: validateNumbers(value.settings, rateFields),
-      entries: value.entries.map(validateEntry),
-    };
-  }
   function summarize(entries, settings) {
     const totals = Object.fromEntries(
       guestFields.map((f) => [
@@ -131,49 +111,6 @@
       .sort(
         (a, b) => a.date.localeCompare(b.date) || a.name.localeCompare(b.name),
       );
-  }
-  function csv(entries, settings) {
-    const t = summarize(entries, settings);
-    const rows = [
-      [
-        "Date",
-        "Name",
-        "Thursday Guests",
-        "Weekend Guests",
-        "Charged Guests",
-        "Free Guests",
-        "Actual Guests",
-        "Entry Charge",
-      ],
-      ...entries.map((e) => [
-        e.date,
-        e.name,
-        ...guestFields.map((f) => e[f]),
-        Number(e.charged_guests) + Number(e.free_guests),
-        (
-          e.thursday_guests * settings.thursday_cost +
-          e.weekend_guests * settings.weekend_cost
-        ).toFixed(2),
-      ]),
-      [],
-      ...rateFields.map((f) => [labels[f], settings[f]]),
-      ...Object.entries(t).map(([f, v]) => [
-        f,
-        ["charge", "tax", "discount", "due"].includes(f) ? v.toFixed(2) : v,
-      ]),
-    ];
-    // Quoting alone does not prevent spreadsheet formula execution.
-    return rows
-      .map((row) =>
-        row
-          .map((v) => {
-            let s = String(v);
-            if (/^[\s]*[=+@-]/.test(s)) s = "'" + s;
-            return '"' + s.replaceAll('"', '""') + '"';
-          })
-          .join(","),
-      )
-      .join("\r\n");
   }
   function create({ db, root, context, toast, setWriting }) {
     let data = null,
@@ -301,13 +238,13 @@
         header +
         `
       ${settingsOpen ? `<section class="panel hotel-space"><h2>Rates & settings</h2><p>These workspace rates apply to all entries, including previous periods. ${owner ? "" : "Only the Owner can change rates."}</p><form id="hotel-settings-form"><div class="form-grid hotel-space">${inputs(rateFields, data.settings, !owner)}</div>${owner ? '<button class="btn primary hotel-space" type="submit">Save rates</button>' : ""}</form></section>` : ""}
-      <section class="hotel-toolbar hotel-space" aria-label="Period and data actions"><div><label class="form-label" for="hotel-mode">View</label><select id="hotel-mode"><option value="month" ${mode === "month" ? "selected" : ""}>Month</option><option value="year" ${mode === "year" ? "selected" : ""}>Year to Date</option></select></div><div><label class="form-label" for="hotel-period">${mode === "year" ? "Year" : "Month"}</label><input id="hotel-period" type="${mode === "year" ? "number" : "month"}" ${mode === "year" ? 'min="2000" max="2100" step="1"' : 'min="2000-01" max="2100-12"'} value="${esc(mode === "year" ? year : month)}" required></div><button class="btn" data-hotel="refresh">Refresh</button><details class="hotel-data"><summary class="btn">Data tools</summary><div class="hotel-data-menu"><button class="btn" data-hotel="csv">Export current view (CSV)</button><button class="btn" data-hotel="backup">Backup workspace data</button>${owner ? '<button class="btn" data-hotel="restore">Restore BackendOS backup</button><button class="btn" data-hotel="clear">Clear current view</button>' : "<p>Ask the Owner to restore or clear data.</p>"}</div></details></section>
+      <section class="hotel-toolbar hotel-space" aria-label="Period controls"><div><label class="form-label" for="hotel-mode">View</label><select id="hotel-mode"><option value="month" ${mode === "month" ? "selected" : ""}>Month</option><option value="year" ${mode === "year" ? "selected" : ""}>Year to Date</option></select></div><div><label class="form-label" for="hotel-period">${mode === "year" ? "Year" : "Month"}</label><input id="hotel-period" type="${mode === "year" ? "number" : "month"}" ${mode === "year" ? 'min="2000" max="2100" step="1"' : 'min="2000-01" max="2100-12"'} value="${esc(mode === "year" ? year : month)}" required></div><button class="btn" data-hotel="refresh">Refresh</button></section>
       <div class="hotel-summary hotel-space"><section class="panel hotel-due"><p>Tax due after discount</p><strong id="hotel-due">${money(t.due)}</strong><p>${data.settings.tax_rate}% tax · ${data.settings.tax_discount}% discount on tax</p></section><section class="panel"><p>Total amount charged</p><strong>${money(t.charge)}</strong><p>Thursday ${money(data.settings.thursday_cost)} · Weekend ${money(data.settings.weekend_cost)}</p></section><section class="panel"><p>Tax before discount</p><strong>${money(t.tax)}</strong><p>Discount ${money(t.discount)}</p></section></div>
       <div class="hotel-guests hotel-space">${[...guestFields, "actual_guests"].map((f) => `<div><span>${labels[f] || "Actual guests"}</span><strong>${t[f]}</strong></div>`).join("")}</div>
       <section class="panel hotel-space"><div class="panel-title"><h2>Guest entries · ${esc(mode === "year" ? year + " Year to Date" : month)}</h2><button class="btn primary" data-hotel="add">Add entry</button></div>${mode === "year" ? "<p>Includes all entries in the selected calendar year, matching the original app.</p>" : ""}
       ${editor ? `<form id="hotel-entry-form" class="hotel-space"><h3>${editor.id ? "Edit entry" : "Add guest entry"}</h3><div class="form-grid"><div><label class="form-label" for="hotel-date">Date</label><input id="hotel-date" name="date" type="date" min="2000-01-01" max="2100-12-31" required value="${esc(editor.date)}"></div><div><label class="form-label" for="hotel-name">Guest or group name</label><input id="hotel-name" name="name" maxlength="200" required value="${esc(editor.name)}"></div>${inputs(guestFields, editor)}</div><div class="top-actions"><button class="btn primary" type="submit">${editor.id ? "Save entry" : "Add guest entry"}</button><button class="btn" data-hotel="cancel" type="button">Cancel</button></div><p class="form-error" role="alert"></p></form>` : ""}
       <div class="hotel-table" tabindex="0" role="region" aria-label="Guest entries, scroll horizontally for all columns"><table><thead><tr><th scope="col">Date</th><th scope="col">Name</th><th scope="col">Thursday</th><th scope="col">Weekend</th><th scope="col">Charged</th><th scope="col">Free</th><th scope="col">Actual</th><th scope="col">Entry charge</th><th scope="col">Actions</th></tr></thead><tbody>${rows.map((e) => `<tr><td>${esc(e.date)}</td><td>${esc(e.name)}</td>${guestFields.map((f) => `<td>${esc(e[f])}</td>`).join("")}<td>${Number(e.charged_guests) + Number(e.free_guests)}</td><td>${money(e.thursday_guests * data.settings.thursday_cost + e.weekend_guests * data.settings.weekend_cost)}</td><td><div class="hotel-actions"><button class="btn" data-hotel="edit" data-entry="${esc(e.id)}">Edit</button>${owner ? `<button class="btn" data-hotel="delete" data-entry="${esc(e.id)}">Delete</button>` : ""}</div></td></tr>`).join("")}</tbody></table></div>${rows.length ? "" : '<p class="hotel-space">No guest entries for this period. Add an entry to get started.</p>'}</section>
-      <input id="hotel-restore-file" type="file" accept=".json,application/json" hidden><p class="hotel-space">Saved to this workspace. Members can add and edit entries; the Owner manages rates, deletes, clears, and restores.</p>`;
+      <p class="hotel-space">Saved to this workspace. Members can add and edit entries; the Owner manages rates and deletes entries.</p>`;
     }
     async function write(fn, message, onSuccess) {
       const c = context(),
@@ -331,14 +268,6 @@
       } finally {
         setWriting(false);
       }
-    }
-    function download(content, type, name) {
-      const url = URL.createObjectURL(new Blob([content], { type }));
-      const a = document.createElement("a");
-      a.href = url;
-      a.download = name;
-      a.click();
-      setTimeout(() => URL.revokeObjectURL(url), 1000);
     }
     root.addEventListener("click", async (e) => {
       const b = e.target.closest("[data-hotel]");
@@ -393,83 +322,6 @@
                   }),
               "Entry deleted",
             );
-        }
-        if (action === "clear") {
-          if (context().role !== "owner")
-            throw Error("Only the Owner can clear entries.");
-          const period = mode === "year" ? year : month,
-            rows = visible(data.entries, mode, period);
-          if (!rows.length) {
-            toast("No entries to clear.");
-            return;
-          }
-          if (
-            confirm(
-              `Clear all ${rows.length} entries for ${period}? This cannot be undone.`,
-            )
-          )
-            await write(async (c) => {
-              const start = mode === "year" ? `${year}-01-01` : `${month}-01`;
-              let end;
-              if (mode === "year") end = `${Number(year) + 1}-01-01`;
-              else {
-                const [y, m] = month.split("-").map(Number);
-                end = `${m === 12 ? y + 1 : y}-${String(m === 12 ? 1 : m + 1).padStart(2, "0")}-01`;
-              }
-              const removed = check(
-                await db
-                  .from("hotel_tax_entries")
-                  .delete()
-                  .eq("workspace_id", c.workspaceId)
-                  .gte("date", start)
-                  .lt("date", end)
-                  .select("id"),
-              );
-              if (!removed.length)
-                throw Error(
-                  "No entries deleted. Refresh and check your access.",
-                );
-            }, "Current view cleared");
-        }
-        if (action === "csv")
-          download(
-            csv(
-              visible(data.entries, mode, mode === "year" ? year : month),
-              data.settings,
-            ),
-            "text/csv",
-            `hotel-tax-${mode === "year" ? year : month}.csv`,
-          );
-        if (action === "backup") {
-          const c = context(),
-            version = generation;
-          setWriting(true);
-          try {
-            const fresh = await fetchData(c, controller.signal);
-            if (isCurrent(c, version))
-              download(
-                JSON.stringify(
-                  {
-                    app: "BackendOS Hotel Tax Calculator",
-                    version: 2,
-                    exportedAt: new Date().toISOString(),
-                    settings: fresh.settings,
-                    entries: fresh.entries.map(validateEntry),
-                  },
-                  null,
-                  2,
-                ),
-                "application/json",
-                `hotel-tax-backup-${today()}.json`,
-              );
-          } finally {
-            setWriting(false);
-          }
-        }
-        if (action === "restore") {
-          if (context().role !== "owner")
-            throw Error("Only the Owner can restore data.");
-          root.querySelector("#hotel-restore-file").click();
         }
       } catch (e) {
         toast(e.message);
@@ -545,39 +397,6 @@
         editor = null;
         draw();
       }
-      if (e.target.id === "hotel-restore-file") {
-        const file = e.target.files[0],
-          c = context(),
-          version = generation;
-        if (!file) return;
-        try {
-          if (c.role !== "owner")
-            throw Error("Only the Owner can restore data.");
-          if (file.size > 10 * 1024 * 1024)
-            throw Error("Backup must be smaller than 10 MB.");
-          const backup = validateBackup(JSON.parse(await file.text()));
-          if (!isCurrent(c, version)) return;
-          if (
-            confirm(
-              `Replace all entries and rates in ${c.workspaceName} with ${backup.entries.length} backed-up entries? This cannot be undone.`,
-            )
-          )
-            await write(
-              async (current) =>
-                check(
-                  await db.rpc("restore_hotel_tax", {
-                    target_workspace: current.workspaceId,
-                    backup,
-                  }),
-                ),
-              "Backup restored",
-            );
-        } catch (e) {
-          if (isCurrent(c, version)) toast(e.message);
-        } finally {
-          if (isCurrent(c, version)) e.target.value = "";
-        }
-      }
     });
     return { draw, load, cancel };
   }
@@ -585,10 +404,8 @@
     create,
     defaults,
     validateEntry,
-    validateBackup,
     summarize,
     visible,
-    csv,
   };
   if (typeof module !== "undefined" && module.exports) module.exports = api;
   // esbuild supplies a CommonJS module wrapper in the browser bundle.

@@ -133,12 +133,13 @@ out of exposed schemas. No additional environment variables or secret keys are n
 Open Hotel Tax Calculator from the home shortcut (or add the shortcut from App
 library). It uses the existing `tax-tracker` app ID, so enabled apps and personal
 shortcut order/visibility are preserved. Settings holds workspace rates, while
-Data tools holds CSV, backup, restore, and clear. Entry forms open only when needed.
+Entries and rates save to Supabase; there is no Data menu, export, backup, restore,
+or bulk-clear UI. Entry forms open only when needed.
 The app follows personal theme/accent settings and never reads the old hotel tracker
 or BackendOS browser storage.
 
-- Owners and Members can view, export, back up, add, and edit guest entries.
-- Only Owners can change rates, delete entries, clear the selected period, or restore.
+- Owners and Members can view, add, and edit guest entries.
+- Only Owners can change rates or delete entries.
 - Workspace and entry IDs cannot be reassigned through UPDATE, even between workspaces
   that a user owns. Every read/write is scoped to the active workspace. Disabled apps
   retain their records but RLS blocks access until the Owner enables the app again.
@@ -154,19 +155,23 @@ all historical periods. Defaults are $319.60 / $282.00 / 6% tax / 1% discount.
 Like v5, **Year to Date** includes the entire selected calendar year, including any
 future-dated entries. Values are rounded only for currency display/export.
 
-Backups contain only the active workspace's entries and rates, excluding identities,
-memberships, appearance, and homepage preferences. Restore accepts only BackendOS
-Hotel Tax Calculator v2 backups, with a 10 MB file and 10,000-entry restore limit;
-prototype v1 backups are rejected. Owners confirm the target workspace before an
-atomic SECURITY INVOKER RPC replaces its entries/rates; invalid input rolls back
-the whole operation. IDs are regenerated and the target workspace is assigned by
-the RPC. CSV exports the selected view, rates, and totals, and neutralizes spreadsheet
-formulas in guest names. Reads paginate to avoid the Data API's default row cap.
+The original versioned migration retains its restore RPC for migration-history
+compatibility; the frontend no longer calls it. Previously applied migrations are
+not rewritten. No database change is needed to remove the Data menu.
 
-`npm test` covers formula parity, validation, CSV, calculator browser CRUD/rates,
-failed writes/loads, backup/restore, period views, persistence, two-account/two-workspace
+Appearance tokens, including the browser's native light/dark color scheme, resolve
+on the HTML root. Light and Dark override the system preference; System follows
+changes to it. Accent selection remains personal and applies across workspaces.
+In Edge, Windows contrast themes/forced colors can override site colors by design;
+the app keeps that accessibility behavior rather than forcing a custom palette and
+explains it in Appearance when detected. Dark Reader and similar extensions can
+also override the app palette; disable the extension for this site to use the
+selected accent and Light/Dark/System theme.
+
+`npm test` covers formula parity, validation, calculator browser CRUD/rates,
+failed writes/loads, period views, persistence, two-account/two-workspace
 UI separation, Member controls, stale requests, and pagination, plus foundation
-regressions. `npm run test:rls` applies all migrations to disposable PostgreSQL 17
+regressions, rendered accent colors, and Light/Dark/System switching. `npm run test:rls` applies all migrations to disposable PostgreSQL 17
 and tests actual grants/RLS, including cross-workspace reads/writes, immutable IDs,
 Owner/Member permissions, disabled apps, revocation, anonymous denial, and atomic
 restore rollback. Browser tests serve the built `dist/` files with a simulated API; hosted Auth/PostgREST/SMTP
