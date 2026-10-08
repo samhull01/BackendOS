@@ -34,9 +34,11 @@ test("auth, workspace UI, private settings, local data preservation and failed w
     res.end(
       req.url === "/client.js"
         ? mock
-        : req.url === "/app.js"
-          ? readFileSync("src/app.js")
-          : readFileSync("index.html"),
+        : req.url === "/hotel-tax.js"
+          ? readFileSync("src/hotel-tax.js")
+          : req.url === "/app.js"
+            ? readFileSync("src/app.js")
+            : readFileSync("index.html"),
     );
   });
   await new Promise((r) => server.listen(0, "127.0.0.1", r));
@@ -132,9 +134,11 @@ test("workspace switching keeps personal homepages and member controls", async (
     res.end(
       req.url === "/client.js"
         ? mock
-        : req.url === "/app.js"
-          ? readFileSync("src/app.js")
-          : readFileSync("index.html"),
+        : req.url === "/hotel-tax.js"
+          ? readFileSync("src/hotel-tax.js")
+          : req.url === "/app.js"
+            ? readFileSync("src/app.js")
+            : readFileSync("index.html"),
     );
   });
   await new Promise((r) => server.listen(0, "127.0.0.1", r));

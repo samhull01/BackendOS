@@ -2,7 +2,8 @@
 
 BackendOS keeps the original workspace shell and example shortcuts. Authentication,
 workspaces, membership, personal appearance, and workspace-specific personal homepages
-now use Supabase. Mini Apps and provider connections are still placeholders.
+now use Supabase. Hotel Tax Calculator is the first functional Mini App; the other
+Mini Apps and provider connections remain placeholders.
 
 ## Configure and run
 
@@ -120,3 +121,53 @@ Before merging/deploying, manually validate on your configured project with two 
 Local PostgreSQL tests exercise cross-workspace reads/writes, self-joining, role escalation,
 owner/member controls, private appearance/homepages, membership revocation, and anonymous denial.
 Hosted integration and email delivery require your migration/Auth settings and working network access.
+
+## Hotel Tax Calculator
+
+Review and apply `supabase/migrations/20261007235134_hotel_tax_calculator.sql` after
+the foundation migration using the manual/CLI workflow above. This PR does not
+apply remote migrations, merge, or deploy. Both new tables enable RLS and have
+explicit authenticated grants; anonymous access is revoked. Keep `backendos_private`
+out of exposed schemas. No additional environment variables or secret keys are needed.
+
+Open Hotel Tax Calculator from the home shortcut (or add the shortcut from App
+library). It uses the existing `tax-tracker` app ID, so enabled apps and personal
+shortcut order/visibility are preserved. Settings holds workspace rates, while
+Data tools holds CSV, backup, restore, and clear. Entry forms open only when needed.
+The app follows personal theme/accent settings and never reads the old hotel tracker
+or BackendOS browser storage.
+
+- Owners and Members can view, export, back up, add, and edit guest entries.
+- Only Owners can change rates, delete entries, clear the selected period, or restore.
+- Workspace and entry IDs cannot be reassigned through UPDATE, even between workspaces
+  that a user owns. Every read/write is scoped to the active workspace. Disabled apps
+  retain their records but RLS blocks access until the Owner enables the app again.
+- Refresh reloads records and checks current workspace access. Switches, navigation,
+  and authentication changes clear drafts/data and reject stale responses. Removing
+  membership blocks subsequent requests; already-rendered records clear on refresh.
+
+Calculations match the attached v5 app: Thursday guests × Thursday cost + weekend
+guests × weekend cost; tax is that charge × tax rate; discount is a percentage of
+**tax**, not revenue. Charged/free guest counts are separate attendance statistics,
+with actual guests = charged + free. Half guests are supported. Rates recalculate
+all historical periods. Defaults are $319.60 / $282.00 / 6% tax / 1% discount.
+Like v5, **Year to Date** includes the entire selected calendar year, including any
+future-dated entries. Values are rounded only for currency display/export.
+
+Backups contain only the active workspace's entries and rates, excluding identities,
+memberships, appearance, and homepage preferences. Restore accepts only BackendOS
+Hotel Tax Calculator v2 backups, with a 10 MB file and 10,000-entry restore limit;
+prototype v1 backups are rejected. Owners confirm the target workspace before an
+atomic SECURITY INVOKER RPC replaces its entries/rates; invalid input rolls back
+the whole operation. IDs are regenerated and the target workspace is assigned by
+the RPC. CSV exports the selected view, rates, and totals, and neutralizes spreadsheet
+formulas in guest names. Reads paginate to avoid the Data API's default row cap.
+
+`npm test` covers formula parity, validation, CSV, calculator browser CRUD/rates,
+failed writes/loads, backup/restore, period views, persistence, two-account/two-workspace
+UI separation, Member controls, stale requests, and pagination, plus foundation
+regressions. `npm run test:rls` applies all migrations to disposable PostgreSQL 17
+and tests actual grants/RLS, including cross-workspace reads/writes, immutable IDs,
+Owner/Member permissions, disabled apps, revocation, anonymous denial, and atomic
+restore rollback. Browser tests use a simulated API; hosted Auth/PostgREST/SMTP
+validation remains a pre-release check and no live project data is changed.

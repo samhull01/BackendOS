@@ -22,4 +22,10 @@ await build({
   format: "iife",
   outfile: "dist/app.js",
 });
+await build({
+  entryPoints: ["src/hotel-tax.js"],
+  bundle: true,
+  format: "iife",
+  outfile: "dist/hotel-tax.js",
+});
 await writeFile("dist/index.html", await readFile("index.html"));

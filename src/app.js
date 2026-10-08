@@ -329,10 +329,10 @@ const apps = [
   },
   {
     id: "tax-tracker",
-    name: "Tax tracker",
-    description: "Totals and tax records",
+    name: "Hotel Tax Calculator",
+    description: "Guest charges and hotel tax",
     icon: "receipt",
-    color: "#51a88e",
+    color: "var(--accent)",
   },
   {
     id: "documents",
@@ -467,7 +467,7 @@ function home() {
       })
       .join(
         "",
-      )}<button class="tile add-tile" data-route="library"><span class="app-icon">${icon("plus")}</span><span class="tile-content"><strong>Add Mini Apps</strong>${prefs.density === "detailed" ? "<small>Browse available Mini Apps</small>" : ""}</span></button></div><div class="home-note">${icon("info")}<span>This is your foundation preview. Example shortcuts let you try the layout. <button data-route="library">Explore the app library</button></span></div>`
+      )}<button class="tile add-tile" data-route="library"><span class="app-icon">${icon("plus")}</span><span class="tile-content"><strong>Add Mini Apps</strong>${prefs.density === "detailed" ? "<small>Browse available Mini Apps</small>" : ""}</span></button></div><div class="home-note">${icon("info")}<span>Your workspace, your shortcuts. <button data-route="library">Explore the app library</button></span></div>`
   );
 }
 function library() {
@@ -478,10 +478,10 @@ function library() {
       "App library",
       "Choose which shortcuts appear on your home screen.",
     ) +
-    `<div class="notice">These are example shortcuts for testing the home screen. Mini Apps will be built and added here as you approve them.</div><div class="library-list">${workspaceApps()
+    `<div class="notice">Hotel Tax Calculator is ready to use. The other shortcuts are examples for future Mini Apps.</div><div class="library-list">${workspaceApps()
       .map(
         (a) =>
-          `<article class="library-card">${appIcon(a)}<div><h3>${a.name}</h3><p>${a.description}</p><small class="badge">Example</small></div><button class="btn ${list.includes(a.id) ? "" : "primary"}" data-toggle="${a.id}">${icon(list.includes(a.id) ? "check" : "plus")} ${list.includes(a.id) ? "On home" : "Add to home"}</button></article>`,
+          `<article class="library-card">${appIcon(a)}<div><h3>${a.name}</h3><p>${a.description}</p><small class="badge">${a.id === "tax-tracker" ? "Available" : "Example"}</small></div><button class="btn ${list.includes(a.id) ? "" : "primary"}" data-toggle="${a.id}">${icon(list.includes(a.id) ? "check" : "plus")} ${list.includes(a.id) ? "On home" : "Add to home"}</button></article>`,
       )
       .join(
         "",
@@ -504,15 +504,15 @@ function edit() {
               return `<div class="edit-row">${appIcon(a)}<strong>${a.name}</strong><div class="row-actions"><button class="icon-btn" data-move="${id}" data-dir="-1" ${i === 0 ? "disabled" : ""} aria-label="Move ${a.name} earlier">${icon("up")}</button><button class="icon-btn" data-move="${id}" data-dir="1" ${i === draft.length - 1 ? "disabled" : ""} aria-label="Move ${a.name} later">${icon("down")}</button><button class="icon-btn" data-remove="${id}" aria-label="Hide ${a.name}">${icon("minus")}</button></div></div>`;
             })
             .join("")
-        : `<div class="empty"><h2>A clean slate.</h2><p>Add example shortcuts below to try your layout.</p></div>`
+        : `<div class="empty"><h2>A clean slate.</h2><p>Add Mini Apps below to make this space yours.</p></div>`
     }</div><div class="section-head"><h2>Available shortcuts</h2><span>Hiding keeps app data</span></div><div class="library-list">${
       workspaceApps()
         .filter((a) => !draft.includes(a.id))
         .map(
           (a) =>
-            `<article class="library-card">${appIcon(a)}<div><h3>${a.name}</h3><p>Example shortcut</p></div><button class="btn" data-toggle="${a.id}">${icon("plus")} Add</button></article>`,
+            `<article class="library-card">${appIcon(a)}<div><h3>${a.name}</h3><p>${a.id === "tax-tracker" ? a.description : "Example shortcut"}</p></div><button class="btn" data-toggle="${a.id}">${icon("plus")} Add</button></article>`,
         )
-        .join("") || "<p>All example shortcuts are on your home screen.</p>"
+        .join("") || "<p>All enabled Mini Apps are on your home screen.</p>"
     }</div>`
   );
 }
@@ -580,6 +580,21 @@ function settings() {
     `<div class="settings-layout"><nav class="settings-nav" aria-label="Settings sections">${tabs.map(([id, ico, label]) => `<button data-route="${id}" class="${route === id ? "active" : ""}" ${route === id ? 'aria-current="page"' : ""}>${icon(ico)}${label}</button>`).join("")}</nav><div>${route === "workspace" ? workspaceSettings() : route === "appearance" ? appearance() : route === "account" ? account() : connections()}</div></div>`
   );
 }
+const hotelTax = window.HotelTax?.create({
+  db,
+  root: main,
+  toast,
+  setWriting,
+  context: () =>
+    cloudReady &&
+    route === "hotel-tax" &&
+    WorkspaceStore.active()?.enabledApps.includes("tax-tracker")
+      ? {
+          ...WorkspaceContext.current(),
+          workspaceName: WorkspaceStore.active().name,
+        }
+      : null,
+});
 function render() {
   if (!WorkspaceStore.active()) {
     emptyView();
@@ -593,6 +608,20 @@ function render() {
       "aria-label",
       `Switch workspace, active business: ${WorkspaceStore.active().name}`,
     );
+  document.querySelectorAll(".dock button").forEach((b) => {
+    const active =
+      b.dataset.route === route ||
+      (b.dataset.route === "appearance" && tabs.some((t) => t[0] === route)) ||
+      (b.dataset.route === "home" && ["edit", "hotel-tax"].includes(route));
+    b.classList.toggle("active", active);
+    if (active) b.setAttribute("aria-current", "page");
+    else b.removeAttribute("aria-current");
+  });
+  if (route === "hotel-tax") {
+    hotelTax.draw();
+    document.title = "BackendOS · Hotel Tax Calculator";
+    return;
+  }
   main.innerHTML =
     route === "home"
       ? home()
@@ -602,28 +631,35 @@ function render() {
           ? edit()
           : settings();
   document.title = `BackendOS · ${route === "home" ? "Home" : route === "library" ? "App library" : route === "edit" ? "Edit home" : "Settings"}`;
-  document.querySelectorAll(".dock button").forEach((b) => {
-    const active =
-      b.dataset.route === route ||
-      (b.dataset.route === "appearance" && tabs.some((t) => t[0] === route)) ||
-      (b.dataset.route === "home" && route === "edit");
-    b.classList.toggle("active", active);
-    if (active) b.setAttribute("aria-current", "page");
-    else b.removeAttribute("aria-current");
-  });
 }
 function navigate(next) {
   if (!WorkspaceStore.active()) {
     emptyView();
     return;
   }
-  if (!["home", "library", "edit", ...tabs.map((t) => t[0])].includes(next))
+  if (
+    ![
+      "home",
+      "library",
+      "edit",
+      "hotel-tax",
+      ...tabs.map((t) => t[0]),
+    ].includes(next)
+  )
     next = "home";
+  if (
+    next === "hotel-tax" &&
+    !WorkspaceStore.active().enabledApps.includes("tax-tracker")
+  )
+    next = "home";
+  const enterHotel = next === "hotel-tax" && route !== next;
+  if (next !== route) hotelTax?.cancel();
   if (route === "edit" && next !== "edit") draft = null;
   route = next;
   if (route === "edit" && !draft) draft = [...prefs.visible];
   if (location.hash !== `#${next}`) history.pushState(null, "", `#${next}`);
   render();
+  if (enterHotel) hotelTax?.load();
   window.scrollTo(0, 0);
   main.focus({ preventScroll: true });
 }
@@ -631,7 +667,7 @@ document.addEventListener("click", async (e) => {
   if (!cloudReady) return;
   try {
     const b = e.target.closest("button");
-    if (!b) return;
+    if (!b || b.hasAttribute("data-hotel")) return;
     if (b.hasAttribute("data-remove-member")) {
       await WorkspaceStore.removeMember(b.dataset.removeMember);
       render();
@@ -716,6 +752,11 @@ document.addEventListener("click", async (e) => {
         toast("This Mini App is not enabled in the active workspace.");
         return;
       }
+      if (a.id === "tax-tracker") {
+        navigate("hotel-tax");
+        await WorkspaceStore.flush();
+        return;
+      }
       document.querySelector("#dialog-content").innerHTML =
         `${appIcon(a)}<h2>${a.name}</h2><p>This is an example shortcut. The ${a.name.toLowerCase()} Mini App hasn’t been built yet.</p><button class="btn primary" data-close>Back to home</button>`;
       document.querySelector("dialog").showModal();
@@ -749,6 +790,7 @@ function workspaceSaved(message) {
 }
 function switchWorkspace(workspaceId) {
   try {
+    hotelTax?.cancel();
     WorkspaceContext.switchTo(workspaceId, () => {
       draft = null;
       main.replaceChildren();
@@ -789,7 +831,7 @@ function workspaceSettings() {
     owner = WorkspaceStore.role() === "owner",
     business = w.business;
   return `<section class="panel"><div class="panel-title"><h2>${esc(w.name)}</h2><span class="badge">${owner ? "Owner" : "Member"}${w.example ? " · Example" : ""}</span></div><p>Business information belongs to this workspace.</p><div class="prototype-note">Cloud workspace · Membership enforced by database permissions.</div><form id="workspace-business-form"><fieldset ${owner ? "" : "disabled"}><div class="form-grid"><div class="wide"><label class="form-label" for="business-name">Workspace / business name</label><input id="business-name" name="name" value="${esc(w.name)}" maxlength="80" required></div><div><label class="form-label" for="business-email">Business email</label><input id="business-email" name="email" type="email" maxlength="254" value="${esc(business.email)}" autocomplete="email"></div><div><label class="form-label" for="business-phone">Phone</label><input id="business-phone" name="phone" type="tel" maxlength="40" value="${esc(business.phone)}" autocomplete="tel"></div><div class="wide"><label class="form-label" for="business-address">Business address</label><textarea id="business-address" name="address" maxlength="300" rows="2" autocomplete="street-address">${esc(business.address)}</textarea></div></div><p class="form-error" role="alert"></p>${owner ? '<button class="btn primary" type="submit">Save business information</button>' : ""}</fieldset></form>${owner ? "" : '<p class="workspace-help">Only the owner can edit business information and manage membership.</p>'}</section>
- <section class="panel"><h2>Enabled Mini Apps</h2><p>Workspace-wide availability. Hiding your personal shortcut never changes this list.</p>${apps.map((a) => `<div class="detail-row"><div><strong>${a.name}</strong><p class="example-caption">Example Mini App</p></div><label class="toggle-label"><input type="checkbox" data-enable="${a.id}" ${w.enabledApps.includes(a.id) ? "checked" : ""} ${owner ? "" : "disabled"}><span>Enabled</span></label></div>`).join("")}${owner ? "" : '<p class="workspace-help">Members use the Mini Apps enabled by the owner.</p>'}</section>
+ <section class="panel"><h2>Enabled Mini Apps</h2><p>Workspace-wide availability. Hiding your personal shortcut never changes this list.</p>${apps.map((a) => `<div class="detail-row"><div><strong>${a.name}</strong><p class="example-caption">${a.id === "tax-tracker" ? "Hotel Tax Calculator" : "Example Mini App"}</p></div><label class="toggle-label"><input type="checkbox" data-enable="${a.id}" ${w.enabledApps.includes(a.id) ? "checked" : ""} ${owner ? "" : "disabled"}><span>Enabled</span></label></div>`).join("")}${owner ? "" : '<p class="workspace-help">Members use the Mini Apps enabled by the owner.</p>'}</section>
  <section class="panel"><h2>Members</h2><p>Owners manage the business. Members use its enabled Mini Apps.</p>${WorkspaceStore.members()
    .map(
      (m) =>
@@ -860,6 +902,8 @@ function emptyView() {
   document.querySelector("#account-id").textContent = WorkspaceStore.user.id;
 }
 function gate(message = "") {
+  hotelTax?.cancel();
+  if (route === "hotel-tax") route = "home";
   WorkspaceStore.invalidate();
   for (const k of ["theme", "accent", "wallpaper", "density", "layout"])
     prefs[k] = defaults[k];
