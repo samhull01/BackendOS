@@ -169,5 +169,5 @@ UI separation, Member controls, stale requests, and pagination, plus foundation
 regressions. `npm run test:rls` applies all migrations to disposable PostgreSQL 17
 and tests actual grants/RLS, including cross-workspace reads/writes, immutable IDs,
 Owner/Member permissions, disabled apps, revocation, anonymous denial, and atomic
-restore rollback. Browser tests use a simulated API; hosted Auth/PostgREST/SMTP
+restore rollback. Browser tests serve the built `dist/` files with a simulated API; hosted Auth/PostgREST/SMTP
 validation remains a pre-release check and no live project data is changed.

@@ -591,5 +591,7 @@
     csv,
   };
   if (typeof module !== "undefined" && module.exports) module.exports = api;
-  else window.HotelTax = api;
+  // esbuild supplies a CommonJS module wrapper in the browser bundle.
+  // Register the browser API independently of the Node test export.
+  if (typeof window !== "undefined") window.HotelTax = api;
 })();

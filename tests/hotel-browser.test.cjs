@@ -15,10 +15,10 @@ async function harness(fn) {
       req.url === "/client.js"
         ? mock
         : req.url === "/app.js"
-          ? readFileSync("src/app.js")
+          ? readFileSync("dist/app.js")
           : req.url === "/hotel-tax.js"
-            ? readFileSync("src/hotel-tax.js")
-            : readFileSync("index.html"),
+            ? readFileSync("dist/hotel-tax.js")
+            : readFileSync("dist/index.html"),
     );
   });
   await new Promise((r) => server.listen(0, "127.0.0.1", r));
