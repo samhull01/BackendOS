@@ -202,3 +202,40 @@ membership convenience, not a change to UUID-based authorization.
 Built-browser and PostgreSQL tests cover duplicates, case normalization, exact lookup,
 confirmation before membership, stale matches, Member/outsider/anonymous denial,
 private profile reads and writes, username changes, and membership preservation.
+
+## Import an old Hotel Tax Tracker CSV
+
+Apply `supabase/migrations/20261010031652_hotel_tax_csv_import.sql` once to the
+configured project before testing this feature. It adds an explicitly granted,
+SECURITY INVOKER import RPC; no existing table or migration is rewritten. This PR
+does not apply it remotely.
+
+An Owner opens Hotel Tax Calculator → **Import old CSV**, selects an export from
+v5 of the original tracker, reviews the destination workspace and guest rows, then
+confirms. Parsing supports UTF-8 BOM, quoted commas, escaped quotes, multiline
+names, CRLF/LF, and half guests. It requires the old export's eight-column header.
+Blank separators and recognized summary rows are excluded; invalid guest rows or
+incomplete rates reject the file rather than silently dropping information.
+Limits are 10 MB per file and 10,000 guest rows; the preview shows the first 100 rows.
+Old exports contain only their selected month/year: upload each period you need.
+
+Imports append entries and never delete or replace existing records. Exact matches
+(date, trimmed case-sensitive name, and all four guest counts) are skipped both
+within the file and in the destination workspace. The result reports imported and
+skipped counts. Identical entries are treated as duplicates even if intentionally
+recorded twice in the old tracker; edited existing entries no longer match their
+original exported version. A duplicate in another workspace does not suppress an
+import into this one. New IDs and the target workspace are assigned by the RPC.
+
+CSV rates are displayed when present. Current workspace rates are retained unless
+the Owner selects **Use these CSV rates**. That option recalculates all workspace
+entries, including historical periods. Actual guest totals, charges, and tax totals
+are recomputed from guest counts/rates rather than copied from summary cells.
+
+The database rechecks Owner membership and enabled-app access, validates every row,
+and imports entries and optional rates in one transaction. Any invalid data or
+permission failure rolls back the entire import. Workspace switching/sign-out
+clears file previews and stale file reads cannot populate another workspace.
+Only the user-selected CSV is read; no prototype browser storage is imported.
+Browser, parser, and actual PostgreSQL tests cover confirmation, quoting, bad rows,
+rate opt-in, retry, duplicate uploads, and two-workspace Owner/Member/outsider denial.

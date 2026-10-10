@@ -579,3 +579,75 @@ test("accounts can choose a username before joining any workspace", () =>
     );
     assert.equal(await page.locator("#sign-out").count(), 1);
   }));
+
+test("legacy CSV requires Owner preview and confirmation, skips duplicates and optionally imports rates", () =>
+  harness(async (page) => {
+    await signin(page, "a@example.com");
+    await open(page);
+    const raw =
+      '"Date","Name","Thursday Guests","Weekend Guests","Charged Guests","Free Guests","Actual Guests","Entry Charge"\r\n"2026-10-01","Legacy, group",1.5,2,3,0.5,3.5,1043.40\r\n\r\nThursday Cost,200\r\nWeekend Cost,282\r\nTax Rate,6%\r\nTax Discount,1%\r\n';
+    const file = {
+      name: "old-tracker.csv",
+      mimeType: "text/csv",
+      buffer: Buffer.from(raw),
+    };
+    await page.locator("#hotel-csv-file").setInputFiles(file);
+    await page.getByRole("heading", { name: "Preview CSV import" }).waitFor();
+    assert.equal(await page.evaluate(() => tables.hotel_tax_entries.length), 0);
+    await page.locator('[data-hotel="cancel-csv"]').click();
+    assert.equal(await page.locator('[data-hotel="confirm-csv"]').count(), 0);
+    await page.locator("#hotel-csv-file").setInputFiles(file);
+    await page.locator("#hotel-csv-rates").check();
+    await page.evaluate(() => (window.failWrite = true));
+    await page.locator('[data-hotel="confirm-csv"]').click();
+    await page.getByText("Write denied", { exact: true }).waitFor();
+    assert.equal(await page.evaluate(() => tables.hotel_tax_entries.length), 0);
+    await page.locator('[data-hotel="confirm-csv"]').click();
+    await page
+      .getByText("1 entries imported; 0 duplicates skipped.", { exact: true })
+      .waitFor();
+    await page.locator(".hotel-table tbody tr").waitFor();
+    assert.equal(await page.locator("#hotel-due").textContent(), "$51.32");
+    await page.locator("#hotel-csv-file").setInputFiles(file);
+    await page.locator('[data-hotel="confirm-csv"]').click();
+    await page
+      .getByText("0 entries imported; 1 duplicates skipped.", { exact: true })
+      .waitFor();
+    assert.equal(await page.evaluate(() => tables.hotel_tax_entries.length), 1);
+    assert.equal(
+      await page.evaluate(() => tables.hotel_tax_entries[0].workspace_id),
+      "A",
+    );
+    await page
+      .locator("#hotel-csv-file")
+      .setInputFiles({
+        name: "bad.csv",
+        mimeType: "text/csv",
+        buffer: Buffer.from("wrong,header"),
+      });
+    await page
+      .getByText("Choose the CSV exported by the old Hotel Tax Tracker", {
+        exact: false,
+      })
+      .waitFor();
+    assert.equal(await page.locator('[data-hotel="confirm-csv"]').count(), 0);
+    await signout(page);
+    await signin(page, "b@example.com");
+    await open(page);
+    assert.equal(await page.locator('[data-hotel="import-csv"]').count(), 0);
+    await page.locator("#workspace-switcher").click();
+    await page.locator('[data-switch="B"]').click();
+    await open(page);
+    await page.locator("#hotel-csv-file").setInputFiles(file);
+    await page.locator('[data-hotel="confirm-csv"]').click();
+    await page
+      .getByText("1 entries imported; 0 duplicates skipped.", { exact: true })
+      .waitFor();
+    assert.equal(
+      await page.evaluate(
+        () =>
+          tables.hotel_tax_entries.filter((e) => e.workspace_id === "B").length,
+      ),
+      1,
+    );
+  }));
