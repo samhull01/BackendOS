@@ -6,7 +6,13 @@ window.calls=[]; window.tables={workspaces:[
 ],workspace_members:[{workspace_id:'A',user_id:'user-a',role:'owner'},{workspace_id:'A',user_id:'user-b',role:'member'},{workspace_id:'B',user_id:'user-b',role:'owner'}],workspace_homes:[],user_preferences:[{user_id:'user-a',appearance:{accent:'#c56740',theme:'dark'}}],user_profiles:[],hotel_tax_settings:[],hotel_tax_entries:[]};
 let current=null, callback;
 window.supabaseClient={auth:{onAuthStateChange(fn){callback=fn;setTimeout(()=>fn('INITIAL_SESSION',current),0)},async getSession(){return {data:{session:current}}},async signInWithPassword(v){current={user:{id:v.email==='a@example.com'?'user-a':'user-b',email:v.email}};callback('SIGNED_IN',current);return {}},async signOut(){current=null;callback('SIGNED_OUT',null);return {}}},
- async rpc(name,args){calls.push({name,args});if(window.failWrite){window.failWrite=false;return {error:{message:'Write denied'}}}if(name==='lookup_workspace_username'||name==='add_workspace_member_by_username'){
+ async rpc(name,args){calls.push({name,args});if(window.failWrite){window.failWrite=false;return {error:{message:'Write denied'}}}if(name==='import_hotel_tax_csv'){
+const wid=args.target_workspace;if(!tables.workspace_members.some(m=>m.workspace_id===wid&&m.user_id===current.user.id&&m.role==='owner'))return {error:{message:'Only the Owner can import CSV'}};
+const key=e=>JSON.stringify([e.date,e.name,e.thursday_guests,e.weekend_guests,e.charged_guests,e.free_guests]);let imported=0;
+for(const e of args.entries){if(!tables.hotel_tax_entries.some(r=>r.workspace_id===wid&&key(r)===key(e))){tables.hotel_tax_entries.push({...e,id:crypto.randomUUID(),workspace_id:wid});imported++;}}
+if(args.rates){let r=tables.hotel_tax_settings.find(r=>r.workspace_id===wid);if(r)Object.assign(r,args.rates);else tables.hotel_tax_settings.push({...args.rates,workspace_id:wid});}
+return {data:{imported,skipped:args.entries.length-imported}};}
+if(name==='lookup_workspace_username'||name==='add_workspace_member_by_username'){
 const role=tables.workspace_members.find(m=>m.workspace_id===args.target_workspace&&m.user_id===current.user.id)?.role;
 if(role!=='owner')return {error:{message:'Only workspace Owners can look up usernames'}};
 const match=tables.user_profiles.find(p=>p.username===args.requested_username.trim().toLowerCase());
